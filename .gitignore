@@ -84,6 +84,7 @@ config.development.json
 config.production.json
 backend/config.development.json
 backend/config.production.json
+backend/evaluate
 
 # Frontend (React / Node)
 frontend/node_modules/

@@ -11,32 +11,50 @@ type Translations = {
 // Global event bus for language changes
 const languageChangeEvent = "language-changed"
 
-const translationsMap: Record<Language, Translations> = {
-  en: enTranslations,
-  th: thTranslations,
+const flattenedTranslations: Record<Language, Record<string, string>> = {
+  en: {},
+  th: {},
 }
+
+function flatten(obj: Translations, prefix = "", target: Record<string, string>) {
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const val = obj[key]
+      const fullKey = prefix ? `${prefix}.${key}` : key
+      if (typeof val === "string") {
+        target[fullKey] = val
+      } else if (val && typeof val === "object") {
+        flatten(val as Translations, fullKey, target)
+      }
+    }
+  }
+}
+
+flatten(enTranslations, "", flattenedTranslations.en)
+flatten(thTranslations, "", flattenedTranslations.th)
 
 export function useLanguage(defaultLang: Language = "en") {
   const [language, setLanguageState] = useState<Language>(defaultLang)
-  const [isLoading, setIsLoading] = useState(true)
 
-  // Load initial language from localStorage
+  // Sync saved language from localStorage on client mount (avoids SSR hydration mismatch)
   useEffect(() => {
-    setIsLoading(true)
-    const saved = localStorage.getItem("language") as Language | null
-    if (saved && ["en", "th"].includes(saved)) {
-      setLanguageState(saved)
-    } else {
-      setLanguageState(defaultLang)
+    try {
+      const saved = localStorage.getItem("language") as Language | null
+      if (saved && (saved === "en" || saved === "th")) {
+        setLanguageState(saved)
+      }
+    } catch {
+      // ignore storage access errors
     }
-    setIsLoading(false)
-  }, [defaultLang])
+  }, [])
 
   // Listen for language changes from other components
   useEffect(() => {
     const handleLanguageChange = (e: Event) => {
       const customEvent = e as CustomEvent<Language>
-      setLanguageState(customEvent.detail)
+      if (customEvent.detail && (customEvent.detail === "en" || customEvent.detail === "th")) {
+        setLanguageState(customEvent.detail)
+      }
     }
 
     window.addEventListener(languageChangeEvent, handleLanguageChange)
@@ -45,29 +63,24 @@ export function useLanguage(defaultLang: Language = "en") {
     }
   }, [])
 
-  const t = useCallback((key: string): string => {
-    const translations = translationsMap[language]
-    const keys = key.split(".")
-    let value: any = translations
-
-    for (const k of keys) {
-      if (value && typeof value === "object" && k in value) {
-        value = value[k]
-      } else {
-        return key
-      }
-    }
-
-    return typeof value === "string" ? value : key
-  }, [language])
+  const t = useCallback(
+    (key: string): string => {
+      return flattenedTranslations[language]?.[key] ?? key
+    },
+    [language]
+  )
 
   const setLang = useCallback((lang: Language) => {
     setLanguageState(lang)
-    localStorage.setItem("language", lang)
+    try {
+      localStorage.setItem("language", lang)
+    } catch {
+      // ignore storage errors
+    }
     // Dispatch event to notify all other components
     const event = new CustomEvent<Language>(languageChangeEvent, { detail: lang })
     window.dispatchEvent(event)
   }, [])
 
-  return { language, t, setLang, isLoading }
+  return { language, t, setLang }
 }

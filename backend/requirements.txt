@@ -4,6 +4,7 @@ uvicorn
 ultralytics
 onnxruntime          # inference for the exported .onnx models (CPU)
 # onnxruntime-gpu    # use this instead on the CUDA machine (RTX 3050)
+openvino>=2024.0.0
 numpy
 opencv-python
 torch

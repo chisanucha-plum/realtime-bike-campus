@@ -3,8 +3,10 @@ import type { Metadata } from "next"
 import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
 import { Analytics } from "@vercel/analytics/next"
+// Analytics only runs in production; Vercel injects it via edge middleware in dev environments
 import { Suspense } from "react"
 import { AppLayout } from "@/components/app-layout"
+import { PwaRegister } from "@/components/pwa-register"
 import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
@@ -56,8 +58,9 @@ export default function RootLayout({
         <AppLayout>
           <Suspense fallback={null}>{children}</Suspense>
         </AppLayout>
+        <PwaRegister />
         <Toaster />
-        <Analytics />
+        {process.env.NODE_ENV === "production" && <Analytics />}
       </body>
     </html>
   )

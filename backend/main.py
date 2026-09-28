@@ -14,10 +14,10 @@ from app.database.database import init_database
 from app.routers.router import get_router
 from app.services.frame_storage import frame_storage
 
-_server_config = Configuration.get_config().server
-CORS_ALLOWED_ORIGINS = _server_config.cors_allowed_origins
-FRAME_RETENTION_DAYS = _server_config.frame_retention_days
-CLEANUP_INTERVAL_HOURS = _server_config.cleanup_interval_hours
+config = Configuration.get_config().server
+CORS_ALLOWED_ORIGINS = config.cors_allowed_origins
+FRAME_RETENTION_DAYS = config.frame_retention_days
+CLEANUP_INTERVAL_HOURS = config.cleanup_interval_hours
 
 # Logging
 logging.basicConfig(level=logging.WARNING, format="%(message)s")

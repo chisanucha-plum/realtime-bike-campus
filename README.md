@@ -64,16 +64,20 @@ A violation is recorded when:
 ### Prerequisites
 - Python 3.12+
 - Node.js 18+
-- PostgreSQL 14+
+- PostgreSQL 14+ or a Supabase project
 
 ### Backend
 ```bash
 cd backend
 pip install -r requirements.txt
-# Set DATABASE_URL environment variable for PostgreSQL
-export DATABASE_URL="postgresql://user:password@localhost:5432/helmet_detection"
+# Set DATABASE_URL to the Supabase connection string from Project Settings > Database
+export DATABASE_URL="postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres"
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+The backend also accepts `SUPABASE_DB_URL`. For component-based configuration,
+use `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_USER`, `DATABASE_PASSWORD`, and
+`DATABASE_NAME`. The legacy lowercase names in `.env` remain supported.
 
 ### Frontend
 ```bash

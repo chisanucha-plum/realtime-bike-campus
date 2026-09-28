@@ -47,6 +47,7 @@ class DetectionRecord:
     over_capacity: bool
     violation: bool
     frame_path: str | None = None  # Frame snapshot path (optional)
+    camera_id: str = "camera-1"  # Camera identifier
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -57,4 +58,5 @@ class DetectionRecord:
             "over_capacity": self.over_capacity,
             "violation": self.violation,
             "frame_path": self.frame_path,
+            "camera_id": self.camera_id,
         }

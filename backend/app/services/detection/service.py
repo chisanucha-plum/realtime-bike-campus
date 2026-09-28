@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from app.configuration import DetectionConfig
+from app.configuration import Configuration, DetectionConfig
 from app.models.detection import DetectionRecord
 from app.services.detection.annotate import MOTO_COLOR, draw_box, draw_detection_line
 from app.services.detection.helmet_analyzer import HelmetAnalyzer, extract_box_coords
@@ -29,18 +29,19 @@ class DetectionService:
         self,
         bike_model: Path,
         helmet_model: Path,
-        config: DetectionConfig,
+        config: DetectionConfig | None = None,
     ) -> None:
         """Load both models and prepare the crossing counter and analyzer.
 
         Args:
             bike_model: Path to motorcycle model (.pt / .onnx / OpenVINO dir)
             helmet_model: Path to helmet model (any supported format)
-            config: Detection configuration
+            config: Detection configuration (optional, uses global config if None)
 
         Raises:
             FileNotFoundError: If a model file does not exist
         """
+        config = config or Configuration.get_config().detection
         if not Path(bike_model).exists():
             raise FileNotFoundError(f"Motorcycle model not found: {bike_model}")
         if not Path(helmet_model).exists():
@@ -100,9 +101,11 @@ class DetectionService:
 
         self._counter.ensure_line(frame.shape[1])
         records = self._process_motorcycle_tracks(frame)
-        draw_detection_line(
-            frame, self._counter.line_x, self._config.line_overlay_alpha
-        )
+        line_x = self._counter.line_x
+        if line_x is not None:
+            draw_detection_line(
+                frame, line_x, self._config.line_overlay_alpha
+            )
         return frame, records
 
     def _process_motorcycle_tracks(self, frame: np.ndarray) -> list[DetectionRecord]:
@@ -110,18 +113,19 @@ class DetectionService:
         records: list[DetectionRecord] = []
 
         try:
-            device_kw = {"device": self._device} if self._moto_is_pt else {}
             with torch.inference_mode():
-                result = self._moto_model.track(
-                    frame,
-                    conf=self._config.bike_confidence,
-                    persist=True,
-                    tracker=self._config.tracker,
-                    classes=[self._config.bike_id],
-                    imgsz=640,
-                    verbose=False,
-                    **device_kw,
-                )[0]
+                track_kwargs: dict[str, object] = {
+                    "conf": self._config.bike_confidence,
+                    "persist": True,
+                    "tracker": self._config.tracker,
+                    "classes": [self._config.bike_id],
+                    "imgsz": getattr(self._config, "bike_imgsz", 640),
+                    "verbose": False,
+                }
+                if self._moto_is_pt:
+                    track_kwargs["device"] = self._device
+                results = self._moto_model.track(frame, **track_kwargs)  # type: ignore[arg-type]
+                result = results[0]
         except Exception as e:
             logger.error(f"Motorcycle tracking failed: {e}")
             return records
@@ -129,7 +133,8 @@ class DetectionService:
         if result.boxes is None or len(result.boxes) == 0:
             return records
 
-        for box in result.boxes:
+        boxes_list = list(result.boxes)  # type: ignore[arg-type]
+        for box in boxes_list:
             if box.id is None:
                 continue
 

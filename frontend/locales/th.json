@@ -29,6 +29,7 @@
   },
   "camera": {
     "camera1": "Camera 1 - ตรวจจับผู้ขับขี่",
+    "select": "เลือกกล้อง",
     "campusMap": "แผนที่วิทยาเขต",
     "live": "Live",
     "livePreview": "เปิดดูภาพสด",

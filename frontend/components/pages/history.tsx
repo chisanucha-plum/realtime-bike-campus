@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { AlertCircle, Download, History as HistoryIcon, RotateCw } from "lucide-react"
+import { AlertCircle, Download, History as HistoryIcon, RotateCw, SlidersHorizontal } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -81,67 +81,96 @@ export function HistoryPage() {
   const violationCount = filtered.filter((detection) => detection.violation).length
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">{t("history.title")}</h2>
-          <p className="text-muted-foreground">{t("history.subtitle")}</p>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground">{t("history.title")}</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">{t("history.subtitle")}</p>
         </div>
-        <Button variant="outline" size="sm" className="gap-2 bg-transparent" onClick={exportCsv} disabled={filtered.length === 0}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 rounded-xl bg-card border-border/80 shadow-xs hover:bg-muted"
+          onClick={exportCsv}
+          disabled={filtered.length === 0}
+        >
           <Download className="h-4 w-4" />
           {t("history.exportCsv")}
         </Button>
       </div>
 
+      {/* Error Notice */}
       {error && (
-        <div className="bg-critical border border-critical-foreground/20 rounded-lg p-4 flex items-start justify-between gap-3">
+        <div className="bg-destructive/10 border border-destructive/20 rounded-2xl p-4 flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-critical-foreground flex-shrink-0 mt-0.5" />
+            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
             <p className="text-sm text-foreground">{error.message}</p>
           </div>
-          <Button size="sm" variant="outline" onClick={load} className="gap-2">
+          <Button size="sm" variant="outline" onClick={load} className="gap-2 rounded-xl">
             <RotateCw className="h-4 w-4" />
             {t("buttons.retry")}
           </Button>
         </div>
       )}
 
-      <Card>
-        <CardContent className="flex flex-col sm:flex-row sm:items-center gap-3 p-4">
-          <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-            <SelectTrigger className="sm:w-[220px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("history.filterAll")}</SelectItem>
-              <SelectItem value="violation">{t("history.filterViolations")}</SelectItem>
-              <SelectItem value="compliant">{t("history.filterCompliant")}</SelectItem>
-              <SelectItem value="overCapacity">{t("history.filterOverCapacity")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input type="date" value={dayFilter} onChange={(event) => setDayFilter(event.target.value)} className="sm:w-[180px]" aria-label={t("history.dayFilter")} />
+      {/* Filter Toolbar */}
+      <Card className="rounded-2xl border-border/80 shadow-xs bg-card/90 backdrop-blur-md">
+        <CardContent className="flex flex-col sm:flex-row sm:items-center gap-3 p-3.5 sm:p-4">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4 text-muted-foreground hidden sm:inline" />
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+              <SelectTrigger className="w-full sm:w-[200px] rounded-xl">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all">{t("history.filterAll")}</SelectItem>
+                <SelectItem value="violation">{t("history.filterViolations")}</SelectItem>
+                <SelectItem value="compliant">{t("history.filterCompliant")}</SelectItem>
+                <SelectItem value="overCapacity">{t("history.filterOverCapacity")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Input
+            type="date"
+            value={dayFilter}
+            onChange={(event) => setDayFilter(event.target.value)}
+            className="w-full sm:w-[170px] rounded-xl"
+            aria-label={t("history.dayFilter")}
+          />
+
           {(statusFilter !== "all" || dayFilter) && (
-            <Button variant="ghost" size="sm" onClick={() => { setStatusFilter("all"); setDayFilter("") }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-xl h-9 text-xs"
+              onClick={() => { setStatusFilter("all"); setDayFilter("") }}
+            >
               {t("history.clearFilters")}
             </Button>
           )}
-          <div className="sm:ml-auto flex items-center gap-2">
-            <Badge variant="secondary">{filtered.length} / {detections.length}</Badge>
-            <Badge variant="destructive">{t("history.violationsBadge")}: {violationCount}</Badge>
+
+          <div className="sm:ml-auto flex items-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/60">
+            <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-muted border border-border/80 text-foreground">
+              {filtered.length} / {detections.length}
+            </span>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+              {t("history.violationsBadge")}: {violationCount}
+            </span>
           </div>
         </CardContent>
       </Card>
 
+      {/* Detection List Container */}
       <div className="relative min-h-[200px]">
         {!isLoading && <DetectionList detections={filtered} t={t} />}
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Card>
-              <CardContent className="p-10 flex flex-col items-center gap-3 text-muted-foreground">
-                <HistoryIcon className="h-10 w-10 opacity-50" />
-                <p>{t("common.loading")}</p>
-              </CardContent>
-            </Card>
+          <div className="flex items-center justify-center py-16">
+            <div className="flex flex-col items-center gap-3 text-muted-foreground">
+              <div className="w-10 h-10 border-3 border-primary/20 border-t-primary rounded-full animate-spin" />
+              <p className="text-sm font-medium">{t("common.loading")}</p>
+            </div>
           </div>
         )}
       </div>

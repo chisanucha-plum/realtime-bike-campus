@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 class LineCrossingCounter:
-    """Reports each right-to-left line crossing once per motorcycle track.
+    """Reports each left-to-right line crossing once per motorcycle track.
 
     Owns every piece of crossing state (line position, per-track history,
     already-counted ids) so the detection service stays stateless about it.
@@ -38,7 +38,7 @@ class LineCrossingCounter:
             )
 
     def observe(self, track_id: int, center_x: int) -> bool:
-        """Record a motorcycle position; True when it just crossed right-to-left.
+        """Record a motorcycle position; True when it just crossed left-to-right.
 
         A track is reported at most once until ``reset``. The first sighting
         never counts as a crossing (no previous side to compare against).
@@ -55,8 +55,8 @@ class LineCrossingCounter:
             self._line_x is not None
             and track_id not in self._counted
             and prev_center_x is not None
-            and prev_center_x > self._line_x
-            and center_x <= self._line_x
+            and prev_center_x < self._line_x
+            and center_x >= self._line_x
         )
         if crossed:
             self._counted.add(track_id)

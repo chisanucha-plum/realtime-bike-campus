@@ -16,12 +16,18 @@
     "roi_top_pad": 3.0,
     "roi_bottom_pad": 1.0,
     "line_position_percent": 0.5,
-    "line_overlay_alpha": 0.3
+    "line_overlay_alpha": 0.3,
+    "bike_imgsz": 640
   },
   "application_settings": {
     "video_path": "src/case/case_03.mp4",
     "use_webcam": false,
-    "webcam_id": 0
+    "webcam_id": 0,
+    "rtsp_transport": "tcp",
+    "rtsp_buffer_size": 1024,
+    "reconnect_delay_seconds": 2.0,
+    "open_timeout_ms": 10000,
+    "read_timeout_ms": 10000
   },
   "key": {
     "secret_key": "your-secret-key-here",

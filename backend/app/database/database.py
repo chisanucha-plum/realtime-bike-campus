@@ -10,15 +10,16 @@ from app.configuration import Configuration
 config = Configuration.get_config()
 postgres_config = config.postgres
 
-# PostgreSQL connection URL configuration
-DATABASE_CONFIG = {
-    "drivername": "postgresql",
-    "host": postgres_config.host,
-    "port": postgres_config.port,
-    "username": postgres_config.user,
-    "password": postgres_config.password,
-    "database": postgres_config.database,
-}
+# Use Supabase's connection string when provided; keep component-based config
+# for existing local PostgreSQL deployments.
+DATABASE_URL = postgres_config.database_url or URL.create(
+    drivername="postgresql",
+    host=postgres_config.host,
+    port=postgres_config.port,
+    username=postgres_config.user,
+    password=postgres_config.password,
+    database=postgres_config.database,
+)
 
 
 class Base(DeclarativeBase):
@@ -28,7 +29,7 @@ class Base(DeclarativeBase):
 
 
 # Create SQLAlchemy engine and session factory
-engine: Engine = create_engine(URL.create(**DATABASE_CONFIG), pool_pre_ping=True)
+engine: Engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal: sessionmaker[Session] = sessionmaker(
     autocommit=False, autoflush=False, bind=engine
 )

@@ -86,10 +86,12 @@ export async function fetchHelmetStats(
  */
 export function subscribeToHelmetEvents(
   onDetection: (detections: DetectionResult[]) => void,
-  onError: (error: Error) => void
+  onError: (error: Error) => void,
+  cameraId: string = "camera-1"
 ): () => void {
   try {
-    const es = new EventSource(`${API_BASE_URL}/helmet/events`)
+    const params = new URLSearchParams({ camera_id: cameraId })
+    const es = new EventSource(`${API_BASE_URL}/helmet/events?${params}`)
 
     es.onmessage = (event) => {
       try {
@@ -131,6 +133,7 @@ export function subscribeToHelmetEvents(
  * Get the MJPEG stream URL for live video feed
  * @returns The stream URL
  */
-export function getStreamUrl(): string {
-  return `${API_BASE_URL}/helmet/stream`
+export function getStreamUrl(cameraId: string = "camera-1"): string {
+  const params = new URLSearchParams({ camera_id: cameraId })
+  return `${API_BASE_URL}/helmet/stream?${params}`
 }

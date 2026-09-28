@@ -13,18 +13,21 @@ const MAX_SILENT_FAILURES = 3
 
 interface UseRealTimeDetectionsOptions {
   maxItems?: number
+  cameraId?: string
   onDetections?: (detections: DetectionResult[]) => void
 }
 
 export function useRealTimeDetections(
   options: UseRealTimeDetectionsOptions = {}
 ): UseRealTimeDetectionsReturn {
-  const { maxItems = MAX_DETECTIONS } = options
+  const { maxItems = MAX_DETECTIONS, cameraId = "camera-1" } = options
 
   const onDetectionsRef = useRef(options.onDetections)
   useEffect(() => {
     onDetectionsRef.current = options.onDetections
   })
+
+  const throttleTimer = useRef<NodeJS.Timeout | null>(null)
 
   const [detections, setDetections] = useState<DetectionResult[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -84,8 +87,13 @@ export function useRealTimeDetections(
           if (!isMountedRef.current) return
           failureCountRef.current = 0
           setError(null)
-          setDetections((prev) => [...newDetections, ...prev].slice(0, maxItems))
-          onDetectionsRef.current?.(newDetections)
+          if (throttleTimer.current) clearTimeout(throttleTimer.current)
+          throttleTimer.current = setTimeout(() => {
+            if (isMountedRef.current) {
+              setDetections((prev) => [...newDetections, ...prev].slice(0, maxItems))
+              onDetectionsRef.current?.(newDetections)
+            }
+          }, 150)
         },
         (err) => {
           if (!isMountedRef.current) return
@@ -93,7 +101,8 @@ export function useRealTimeDetections(
           console.warn(`Detection stream error (${failureCountRef.current}):`, err.message)
           if (failureCountRef.current >= MAX_SILENT_FAILURES) setError(err)
           retryTimer = setTimeout(connect, SSE_RETRY_DELAY_MS)
-        }
+        },
+        cameraId
       )
     }
 
@@ -105,17 +114,11 @@ export function useRealTimeDetections(
       sseRef.current?.()
       sseRef.current = null
     }
-  }, [isRecording, maxItems])
+  }, [cameraId, isRecording, maxItems])
 
   const handleSetIsRecording = useCallback((value: boolean) => {
     setIsRecording(value)
   }, [])
 
-  return {
-    detections,
-    isLoading,
-    error,
-    isRecording,
-    setIsRecording: handleSetIsRecording,
-  }
+  return { detections, isLoading, error, isRecording, setIsRecording: handleSetIsRecording }
 }

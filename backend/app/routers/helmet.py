@@ -18,7 +18,7 @@ from app.schemas.helmet import (
     StatsSummaryResponse,
     ViolationTypeCount,
 )
-from app.services.camera_hub import camera_hub
+from app.services.camera_hub import get_camera_hub
 from app.services.frame_storage import frame_storage
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,9 @@ def _bucket_label(timestamp: str, bucket_size: str) -> str:
     return timestamp[:10] if bucket_size == "day" else timestamp[:13]
 
 
-def _iter_bucket_labels(range_from: date, range_to: date, bucket_size: str) -> Iterator[str]:
+def _iter_bucket_labels(
+    range_from: date, range_to: date, bucket_size: str
+) -> Iterator[str]:
     """Yield every bucket label in [range_from, range_to] so charts get zero-filled gaps."""
     current = range_from
     while current <= range_to:
@@ -52,10 +54,12 @@ def _iter_bucket_labels(range_from: date, range_to: date, bucket_size: str) -> I
 
 
 @router.get("/stream", status_code=status.HTTP_200_OK)
-async def helmet_video_stream() -> StreamingResponse:
+async def helmet_video_stream(
+    camera_id: str = Query(default="camera-1", pattern=r"^camera-1$"),
+) -> StreamingResponse:
     """Return MJPEG video stream with YOLO detection annotations."""
     logger.info("Video stream client connected")
-    q = camera_hub.subscribe_frames()
+    q = get_camera_hub(camera_id).subscribe_frames()
 
     async def generate() -> Any:
         try:
@@ -69,7 +73,7 @@ async def helmet_video_stream() -> StreamingResponse:
         except asyncio.CancelledError:
             logger.info("Video stream client disconnected")
         finally:
-            camera_hub.unsubscribe_frames(q)
+            get_camera_hub(camera_id).unsubscribe_frames(q)
 
     return StreamingResponse(
         generate(),
@@ -78,7 +82,9 @@ async def helmet_video_stream() -> StreamingResponse:
 
 
 @router.get("/events", status_code=status.HTTP_200_OK)
-async def helmet_detection_events() -> StreamingResponse:
+async def helmet_detection_events(
+    camera_id: str = Query(default="camera-1", pattern=r"^camera-1$"),
+) -> StreamingResponse:
     """Return Server-Sent Events stream for detection records.
 
     Emits detection JSON payload whenever motorcycle crosses detection line.
@@ -87,17 +93,30 @@ async def helmet_detection_events() -> StreamingResponse:
         {"motorcycle_track_id": 1, "helmet_status": true, "violation": false, ...}
     """
     logger.info("Detection events stream client connected")
-    q = camera_hub.subscribe_detections()
+    queue = get_camera_hub(camera_id).subscribe_detections()
 
     async def generate() -> Any:
+        pending: dict[asyncio.Task[str], asyncio.Queue[str]] = {
+            asyncio.create_task(queue.get()): queue
+        }
         try:
             while True:
-                payload: str = await q.get()
-                yield f"data: {payload}\n\n"
+                done, _ = await asyncio.wait(
+                    pending,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done:
+                    result_queue = pending.pop(task)
+                    yield f"data: {task.result()}\n\n"
+                    pending[asyncio.create_task(result_queue.get())] = result_queue
         except asyncio.CancelledError:
             logger.info("Detection events stream client disconnected")
         finally:
-            camera_hub.unsubscribe_detections(q)
+            # Cancel all pending tasks and wait for them to finish cleanly
+            for task in list(pending):
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            get_camera_hub(camera_id).unsubscribe_detections(queue)
 
     return StreamingResponse(
         generate(),
@@ -162,7 +181,9 @@ def _parse_date_range(from_date: str | None, to_date: str | None) -> tuple[date,
     return range_from, range_to
 
 
-def _load_rows_in_range(db: Session, range_from: date, range_to: date) -> list[HistoryStatus]:
+def _load_rows_in_range(
+    db: Session, range_from: date, range_to: date
+) -> list[HistoryStatus]:
     """Load history rows whose stored timestamp falls within [range_from, range_to].
 
     Timestamps are stored as "YYYY-MM-DD HH:MM:SS" strings, so plain string
@@ -212,8 +233,12 @@ def _accumulate_buckets(
 
 @router.get("/stats", response_model=HelmetStatsResponse)
 async def get_helmet_stats(
-    from_date: str | None = Query(default=None, alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$"),
-    to_date: str | None = Query(default=None, alias="to", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    from_date: str | None = Query(
+        default=None, alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$"
+    ),
+    to_date: str | None = Query(
+        default=None, alias="to", pattern=r"^\d{4}-\d{2}-\d{2}$"
+    ),
     bucket: Literal["hour", "day"] = Query(default="day"),
     db: Session = Depends(get_db),
 ) -> HelmetStatsResponse:
@@ -244,7 +269,9 @@ async def get_helmet_stats(
         helmet_on=totals.helmet_on,
         helmet_off=totals.helmet_off,
         excess_passengers=totals.excess,
-        compliance_percent=round(totals.helmet_on / denominator * 100, 1) if denominator else 0.0,
+        compliance_percent=round(totals.helmet_on / denominator * 100, 1)
+        if denominator
+        else 0.0,
     )
 
     logger.info(f"Stats {range_from}..{range_to} ({bucket}): {len(rows)} records")
@@ -280,4 +307,3 @@ async def get_frame(date: str, filename: str) -> FileResponse:
 
     logger.debug(f"Serving frame: {filepath}")
     return FileResponse(filepath, media_type="image/jpeg")
-

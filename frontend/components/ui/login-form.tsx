@@ -9,7 +9,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card"
 import {
   Field,
@@ -18,7 +17,7 @@ import {
 } from "./field"
 import { Input } from "@/components/ui/input"
 import { useRouter } from "next/navigation"
-import { FormEvent, useState } from "react"
+import { FormEvent, useState, useCallback, ChangeEvent } from "react"
 import { useLanguage } from "@/hooks/useLanguage"
 import { LanguageSelector } from "@/components/LanguageSelector"
 
@@ -33,7 +32,15 @@ export function LoginForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleEmailChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value)
+  }, [])
+
+  const handlePasswordChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value)
+  }, [])
+
+  const handleSubmit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setLoading(true)
     setError(null)
@@ -62,19 +69,19 @@ export function LoginForm({
     } finally {
       setLoading(false)
     }
-  }
+  }, [email, password, router, t])
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <div className="flex justify-end">
         <LanguageSelector currentLanguage={language as "en" | "th"} onLanguageChange={setLang} />
       </div>
-      <Card>
+      <Card className="rounded-2xl border-border/80 shadow-md">
         <CardHeader>
-          <div className="flex justify-center">
-            <img src="/icon.png" alt="KMUT logo" className="h-30 w-30 object-contain" />
+          <div className="flex justify-center mb-2">
+            <img src="/icon.png" alt="KMUTT Logo" className="h-24 w-24 object-contain" />
           </div>
-          <CardDescription className="text-center text-sm font-bold leading-none  ">
+          <CardDescription className="text-center text-sm font-bold leading-tight">
             {t("login.title")}
           </CardDescription>
         </CardHeader>
@@ -88,8 +95,9 @@ export function LoginForm({
                   type="email"
                   placeholder="kmutt@example.com"
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  onChange={handleEmailChange}
                   required
+                  className="rounded-xl"
                 />
               </Field>
               <Field>
@@ -100,19 +108,20 @@ export function LoginForm({
                   id="password"
                   type="password"
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
+                  onChange={handlePasswordChange}
                   required
+                  className="rounded-xl"
                 />
               </Field>
               {error && (
-                <p className="text-sm text-red-600" role="alert">
+                <p className="text-sm text-destructive" role="alert">
                   {error}
                 </p>
               )}
-              <Field>
+              <Field className="pt-2">
                 <Button
                   type="submit"
-                  className="bg-orange-500 text-white hover:bg-orange-600"
+                  className="bg-orange-500 text-white hover:bg-orange-600 rounded-xl h-10 font-semibold shadow-xs"
                   disabled={loading}
                 >
                   {loading ? (
@@ -130,7 +139,8 @@ export function LoginForm({
                 </Button>
                 <Button
                   type="button"
-                  className="bg-white text-black hover:bg-orange-600"
+                  variant="outline"
+                  className="rounded-xl h-10 font-semibold"
                   disabled={loading}
                 >
                   {t("buttons.loginWithGoogle")}

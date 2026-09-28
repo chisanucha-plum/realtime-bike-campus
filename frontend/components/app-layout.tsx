@@ -4,7 +4,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { ApiError, getCurrentUser, refreshAccessToken } from "@/lib/api/auth"
 import type { CurrentUserResponse } from "@/lib/api/auth"
 import { Header } from "@/components/header"
-import { Sidebar } from "@/components/sidebar"
+import { FloatingToolbar } from "@/components/floating-toolbar"
 import {
   getStoredAccessToken,
   getStoredUserRole,
@@ -22,9 +22,6 @@ interface AppLayoutProps {
 export function AppLayout({ children }: AppLayoutProps) {
   const pathname = usePathname()
   const router = useRouter()
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   // True once the first /user/me attempt after a page load has settled, so
   // route guards do not act on the not-yet-restored (null) role.
   const [isSessionReady, setIsSessionReady] = useState(false)
@@ -45,24 +42,6 @@ export function AppLayout({ children }: AppLayoutProps) {
 
     return true
   }
-
-  useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 1024
-      setIsMobile(mobile)
-      if (mobile) {
-        setSidebarCollapsed(true)
-        setSidebarOpen(false)
-      }
-    }
-
-    handleResize()
-    window.addEventListener("resize", handleResize)
-
-    return () => {
-      window.removeEventListener("resize", handleResize)
-    }
-  }, [])
 
   useEffect(() => {
     // Wait for the session restore to settle first — right after a reload the
@@ -160,55 +139,20 @@ export function AppLayout({ children }: AppLayoutProps) {
     }
   }, [pathname])
 
-  const toggleSidebar = () => {
-    if (isMobile) {
-      setSidebarOpen(!sidebarOpen)
-    } else {
-      setSidebarCollapsed(!sidebarCollapsed)
-    }
-  }
-
-  const closeMobileSidebar = () => {
-    if (isMobile) {
-      setSidebarOpen(false)
-    }
-  }
-
   if (pathname === "/") {
     return <>{children}</>
   }
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen bg-background overflow-hidden">
-        {/* Mobile Overlay */}
-        {isMobile && sidebarOpen && (
-          <div
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-300"
-            onClick={closeMobileSidebar}
-          />
-        )}
+      <div className="flex h-screen bg-background overflow-hidden relative">
+        {/* Responsive Floating Action Navigation (Left on Desktop, Bottom Dock on Mobile) */}
+        <FloatingToolbar />
 
-        {/* Sidebar */}
-        <div
-          className={`
-            ${isMobile ? "fixed left-0 top-0 h-full z-50" : "relative"}
-            ${isMobile && !sidebarOpen ? "-translate-x-full" : "translate-x-0"}
-            transition-transform duration-300 ease-in-out
-          `}
-        >
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onToggle={toggleSidebar}
-            onNavigate={closeMobileSidebar}
-            isMobile={isMobile}
-          />
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <Header onMenuClick={toggleSidebar} />
-          <main className="flex-1 overflow-auto p-4 sm:p-6">
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0 pl-0 pb-16 md:pb-0 md:pl-[84px] lg:pl-[88px]">
+          <Header />
+          <main className="flex-1 overflow-auto p-2.5 sm:p-4 md:p-6">
             <ErrorBoundary>{children}</ErrorBoundary>
           </main>
         </div>
