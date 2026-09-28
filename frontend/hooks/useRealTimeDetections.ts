@@ -27,6 +27,8 @@ export function useRealTimeDetections(
     onDetectionsRef.current = options.onDetections
   })
 
+  const throttleTimer = useRef<NodeJS.Timeout | null>(null)
+
   const [detections, setDetections] = useState<DetectionResult[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -85,8 +87,13 @@ export function useRealTimeDetections(
           if (!isMountedRef.current) return
           failureCountRef.current = 0
           setError(null)
-          setDetections((prev) => [...newDetections, ...prev].slice(0, maxItems))
-          onDetectionsRef.current?.(newDetections)
+          if (throttleTimer.current) clearTimeout(throttleTimer.current)
+          throttleTimer.current = setTimeout(() => {
+            if (isMountedRef.current) {
+              setDetections((prev) => [...newDetections, ...prev].slice(0, maxItems))
+              onDetectionsRef.current?.(newDetections)
+            }
+          }, 150)
         },
         (err) => {
           if (!isMountedRef.current) return

@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useMemo } from "react"
-import type React from "react"
+import React, { useEffect, useRef, useState, useMemo } from "react"
 import {
   AlertCircle,
   AlertTriangle,
@@ -50,7 +49,7 @@ interface TodaySummary {
   compliance_percent: number
 }
 
-function FloatingStatsStack({
+const FloatingStatsStack = React.memo(function FloatingStatsStack({
   summary,
   isLoading,
   isRecording,
@@ -65,7 +64,7 @@ function FloatingStatsStack({
   cameraLoading: boolean
   t: (key: string) => string
 }) {
-  const statItems = [
+  const statItems = useMemo(() => [
     {
       icon: BikeIcon,
       label: t("stats.motorcyclesDetected"),
@@ -86,7 +85,7 @@ function FloatingStatsStack({
       label: t("stats.complianceRate"),
       value: isLoading || !summary ? "-" : `${summary.compliance_percent}%`,
     },
-  ]
+  ], [summary, isLoading, t])
 
   return (
     <div className="absolute top-2 right-2 sm:top-3 sm:right-3 z-20 flex flex-col items-end gap-1.5 sm:gap-2 max-w-[calc(100%-16px)] sm:max-w-none w-64 xs:w-72 sm:w-80 pointer-events-auto">
@@ -155,7 +154,7 @@ function FloatingStatsStack({
       </div>
     </div>
   )
-}
+})
 
 /** Upper bound for the SSE/history buffer regardless of display settings */
 const MAX_SSE_BUFFER = 50

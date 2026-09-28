@@ -95,7 +95,6 @@ class ApplicationSettingsConfig:
     read_timeout_ms: int = 10000
 
     @staticmethod
-    @staticmethod
     def from_dict(data: dict) -> "ApplicationSettingsConfig":
         rtsp_override = os.environ.get("RTSP_VIDEO_PATH", "").strip()
 
@@ -133,16 +132,22 @@ class PostgresConfig:
         database_url = os.environ.get("DATABASE_URL") or os.environ.get(
             "SUPABASE_DB_URL"
         )
+        port_raw = os.environ.get("DATABASE_PORT", os.environ.get("port", "5432"))
+        try:
+            port = int(port_raw) if port_raw else 5432
+        except (ValueError, TypeError):
+            port = 5432
+
         return PostgresConfig(
             database_url=database_url,
-            host=os.environ.get("DATABASE_HOST", os.environ.get("host")),
-            port=int(os.environ.get("DATABASE_PORT", os.environ.get("port"))),
-            user=os.environ.get("DATABASE_USER", os.environ.get("user")),
+            host=os.environ.get("DATABASE_HOST", os.environ.get("host", "localhost")),
+            port=port,
+            user=os.environ.get("DATABASE_USER", os.environ.get("user", "postgres")),
             password=os.environ.get(
-                "DATABASE_PASSWORD", os.environ.get("password")
+                "DATABASE_PASSWORD", os.environ.get("password", "")
             ),
             database=os.environ.get(
-                "DATABASE_NAME", os.environ.get("dbname")
+                "DATABASE_NAME", os.environ.get("dbname", "postgres")
             ),
         )
 
@@ -211,10 +216,15 @@ class Key:
 
     @staticmethod
     def from_dict(obj: Any) -> "Key":
+        secret_key = os.environ.get("SECRET_KEY") or str(obj.get("secret_key", ""))
+        algorithm = os.environ.get("ALGORITHM") or str(obj.get("algorithm", "HS256"))
+        access_token_minutes = int(
+            os.environ.get("ACCESS_TOKEN_MINUTES") or obj.get("access_token_minutes", 30)
+        )
         return Key(
-            secret_key=str(obj.get("secret_key")),
-            algorithm=str(obj.get("algorithm", "HS256")),
-            access_token_minutes=int(obj.get("access_token_minutes", 30)),
+            secret_key=secret_key,
+            algorithm=algorithm,
+            access_token_minutes=access_token_minutes,
         )
 
 
@@ -260,7 +270,15 @@ class Configuration:
             json.JSONDecodeError: If config JSON is invalid
         """
         site = os.environ.get("SITE", "development")
-        config_path = Path(f"config.{site}.json")
+        filename = f"config.{site}.json"
+
+        # Search current working dir, backend dir, or relative to this file
+        candidate_paths = [
+            Path(filename),
+            Path(__file__).resolve().parent.parent / filename,
+            Path.cwd() / "backend" / filename,
+        ]
+        config_path = next((p for p in candidate_paths if p.is_file()), Path(filename))
 
         with open(config_path, encoding="utf-8") as f:
             data = json.load(f)

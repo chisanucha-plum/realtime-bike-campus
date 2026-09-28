@@ -25,6 +25,7 @@ def create_mock_config() -> DetectionConfig:
     config.bike_id = 3
     config.bike_confidence = 0.5
     config.tracker = "bytetrack.yaml"
+    config.bike_imgsz = 640
     config.helmet_confidence = 0.20
     config.helmet_imgsz = 640
     config.helmet_on = "helmet on"
@@ -228,12 +229,12 @@ class TestLineCrossing:
         counter._line_x = 320
         return counter
 
-    def test_cross_from_right_to_left_detected(self):
-        """Moving from right of line to left of line counts as crossing."""
+    def test_cross_from_left_to_right_detected(self):
+        """Moving from left of line to right of line counts as crossing."""
         counter = self.make_counter()
-        counter._history[1] = 400  # previously right of line
+        counter._history[1] = 300  # previously left of line
 
-        assert counter.observe(track_id=1, center_x=300) is True
+        assert counter.observe(track_id=1, center_x=400) is True
 
     def test_no_history_returns_false(self):
         """First sighting of a track never counts as crossing."""
@@ -244,17 +245,17 @@ class TestLineCrossing:
     def test_already_counted_returns_false(self):
         """A track already counted is not reported again."""
         counter = self.make_counter()
-        counter._history[1] = 400
+        counter._history[1] = 300
         counter._counted.add(1)
 
-        assert counter.observe(track_id=1, center_x=300) is False
+        assert counter.observe(track_id=1, center_x=400) is False
 
-    def test_moving_left_to_right_not_crossed(self):
-        """Crossing direction right-to-left only; left-to-right is ignored."""
+    def test_moving_right_to_left_not_crossed(self):
+        """Crossing direction left-to-right only; right-to-left is ignored."""
         counter = self.make_counter()
-        counter._history[2] = 300  # previously left of line
+        counter._history[2] = 400  # previously right of line
 
-        assert counter.observe(track_id=2, center_x=400) is False
+        assert counter.observe(track_id=2, center_x=300) is False
 
     def test_staying_right_of_line_not_crossed(self):
         """Movement entirely on the right side is not a crossing."""

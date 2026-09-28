@@ -16,12 +16,6 @@ def make_settings(**overrides) -> ApplicationSettingsConfig:
     return ApplicationSettingsConfig(**values)
 
 
-def make_config(app_settings: ApplicationSettingsConfig) -> Mock:
-    """Minimal stand-in for full Configuration."""
-    config = Mock()
-    config.application_settings = app_settings
-    return config
-
 
 class TestIsStreamUrl:
     """Test network-stream URL classification."""
@@ -48,30 +42,30 @@ class TestOpenCapture:
     def test_stream_url_passed_unmodified(self):
         hub = CameraHub()
         url = "rtsp://user:pass@host:554/stream2"
-        config = make_config(make_settings(video_path=url))
+        settings = make_settings(video_path=url)
 
         with patch("app.services.camera_hub.cv2.VideoCapture") as mock_ctor:
-            hub._open_capture(config)
+            hub._open_capture(settings)
 
         mock_ctor.assert_called_once_with(url, cv2.CAP_FFMPEG)
 
     def test_file_path_normalized_via_pathlib(self):
         hub = CameraHub()
         path_str = "src/case/case_03.mp4"
-        config = make_config(make_settings(video_path=path_str))
+        settings = make_settings(video_path=path_str)
 
         with patch("app.services.camera_hub.cv2.VideoCapture") as mock_ctor:
-            hub._open_capture(config)
+            hub._open_capture(settings)
 
         expected = str(Path(path_str))
         mock_ctor.assert_called_once_with(expected)
 
     def test_webcam_uses_directshow_backend(self):
         hub = CameraHub()
-        config = make_config(make_settings(use_webcam=True, webcam_id=0))
+        settings = make_settings(use_webcam=True, webcam_id=0)
 
         with patch("app.services.camera_hub.cv2.VideoCapture") as mock_ctor:
-            hub._open_capture(config)
+            hub._open_capture(settings)
 
         mock_ctor.assert_called_once_with(0, cv2.CAP_DSHOW)
 

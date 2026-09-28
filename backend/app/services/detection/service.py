@@ -14,7 +14,6 @@ from app.services.detection.helmet_analyzer import HelmetAnalyzer, extract_box_c
 from app.services.detection.line_counter import LineCrossingCounter
 
 logger = logging.getLogger(__name__)
-config = Configuration.get_config()
 
 
 class DetectionService:
@@ -30,18 +29,19 @@ class DetectionService:
         self,
         bike_model: Path,
         helmet_model: Path,
+        config: DetectionConfig | None = None,
     ) -> None:
-        detection_config = config.detection
         """Load both models and prepare the crossing counter and analyzer.
 
         Args:
             bike_model: Path to motorcycle model (.pt / .onnx / OpenVINO dir)
             helmet_model: Path to helmet model (any supported format)
-            config: Detection configuration
+            config: Detection configuration (optional, uses global config if None)
 
         Raises:
             FileNotFoundError: If a model file does not exist
         """
+        config = config or Configuration.get_config().detection
         if not Path(bike_model).exists():
             raise FileNotFoundError(f"Motorcycle model not found: {bike_model}")
         if not Path(helmet_model).exists():
@@ -64,20 +64,20 @@ class DetectionService:
         if self._helmet_is_pt:
             self._helmet_model.to(self._device)
 
-        self._config: DetectionConfig = detection_config
-        self._counter = LineCrossingCounter(detection_config.line_position_percent)
+        self._config: DetectionConfig = config
+        self._counter = LineCrossingCounter(config.line_position_percent)
         self._helmet_analyzer = HelmetAnalyzer(
-            self._helmet_model, detection_config, self._device, is_pt=self._helmet_is_pt
+            self._helmet_model, config, self._device, is_pt=self._helmet_is_pt
         )
 
         logger.info(
             "DetectionService initialized",
             extra={
                 "device": self._device,
-                "roi_side_pad": detection_config.roi_side_pad,
-                "roi_top_pad": detection_config.roi_top_pad,
-                "roi_bottom_pad": detection_config.roi_bottom_pad,
-                "line_position_percent": detection_config.line_position_percent,
+                "roi_side_pad": config.roi_side_pad,
+                "roi_top_pad": config.roi_top_pad,
+                "roi_bottom_pad": config.roi_bottom_pad,
+                "line_position_percent": config.line_position_percent,
             },
         )
 
@@ -119,7 +119,7 @@ class DetectionService:
                     "persist": True,
                     "tracker": self._config.tracker,
                     "classes": [self._config.bike_id],
-                    "imgsz": config.detection.bike_imgsz,
+                    "imgsz": getattr(self._config, "bike_imgsz", 640),
                     "verbose": False,
                 }
                 if self._moto_is_pt:

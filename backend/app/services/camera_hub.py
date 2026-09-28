@@ -349,7 +349,18 @@ class CameraHub:
                 cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, app.read_timeout_ms)
             return cap
 
-        return cv2.VideoCapture(str(Path(app.video_path)))
+        video_path_str = str(Path(app.video_path))
+        cap = cv2.VideoCapture(video_path_str)
+        if not cap.isOpened() or not cap.grab():
+            cap.release()
+            if hasattr(cv2, "CAP_MSMF"):
+                cap = cv2.VideoCapture(video_path_str, cv2.CAP_MSMF)
+            else:
+                cap = cv2.VideoCapture(video_path_str)
+        else:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+        return cap
 
     def _process_frame(
         self, frame: np.ndarray, service: DetectionService, jpeg_quality: int
@@ -432,6 +443,9 @@ class CameraHub:
                         )
                         # Restart video from beginning
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        if not cap.grab():
+                            cap.release()
+                            cap = self._open_capture()
                         service.reset_tracks()
                         continue
 
