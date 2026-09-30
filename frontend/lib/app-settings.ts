@@ -20,7 +20,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   showOnlyViolations: false,
 }
 
-const STORAGE_KEY = "helmet_app_settings"
+export const STORAGE_KEY = "helmet_app_settings"
+export const HELMET_SETTINGS_UPDATED_EVENT = "helmet_settings_updated"
 
 export function loadDisplayPrefs(): DisplayPrefs {
   try {

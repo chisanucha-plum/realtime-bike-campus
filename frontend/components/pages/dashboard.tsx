@@ -68,7 +68,7 @@ interface StatCardProps {
 
 const StatCard = memo(function StatCard({ label, value, trend, icon: Icon, iconBgClass, iconColorClass }: StatCardProps) {
   return (
-    <Card className="rounded-2xl border-border/80 shadow-xs hover:shadow-md transition-all duration-200">
+    <Card className="rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.04)] hover:shadow-md transition-all duration-200">
       <CardContent className="p-5">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -229,7 +229,7 @@ export function Dashboard() {
 
         <div className="flex items-center gap-3">
           <Select value={timeRange} onValueChange={(value) => setTimeRange(value as StatsTimeRange)}>
-            <SelectTrigger className="w-[140px] rounded-xl bg-card border-border/80">
+            <SelectTrigger className="w-[140px] rounded-xl bg-card border-neutral-200/80 dark:border-neutral-800/80 shadow-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="rounded-xl">
@@ -239,8 +239,8 @@ export function Dashboard() {
             </SelectContent>
           </Select>
 
-          <Button variant="outline" size="sm" className="gap-2 rounded-xl bg-card border-border/80 shadow-xs hover:bg-muted" onClick={exportReport}>
-            <Download className="h-4 w-4" />
+          <Button variant="outline" size="sm" className="gap-2 rounded-xl bg-card border-neutral-200/80 dark:border-neutral-800/80 shadow-xs hover:bg-muted" onClick={exportReport}>
+            <Download className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
             {t("dashboard.downloadReport")}
           </Button>
         </div>
@@ -253,7 +253,7 @@ export function Dashboard() {
           value={totalViolations}
           trend={<TrendIndicator delta={violationsDelta} goodWhen="down" vsLabel={t("dashboard.vsPrevPeriod")} />}
           icon={AlertTriangle}
-          iconBgClass="bg-rose-500/15 border border-rose-500/20"
+          iconBgClass="bg-rose-500/10 border border-rose-500/20"
           iconColorClass="text-rose-600 dark:text-rose-400"
         />
 
@@ -262,7 +262,7 @@ export function Dashboard() {
           value={`${compliancePercent}%`}
           trend={<TrendIndicator delta={complianceDelta} goodWhen="up" vsLabel={t("dashboard.vsPrevPeriod")} />}
           icon={Shield}
-          iconBgClass="bg-emerald-500/15 border border-emerald-500/20"
+          iconBgClass="bg-emerald-500/10 border border-emerald-500/20"
           iconColorClass="text-emerald-600 dark:text-emerald-400"
         />
 
@@ -271,7 +271,7 @@ export function Dashboard() {
           value={totalDetections}
           trend={<TrendIndicator delta={detectionsDelta} goodWhen="up" vsLabel={t("dashboard.vsPrevPeriod")} />}
           icon={BikeIcon}
-          iconBgClass="bg-blue-500/15 border border-blue-500/20"
+          iconBgClass="bg-blue-500/10 border border-blue-500/20"
           iconColorClass="text-blue-600 dark:text-blue-400"
         />
 
@@ -280,7 +280,7 @@ export function Dashboard() {
           value={excessPassengers}
           trend={<TrendIndicator delta={excessDelta} goodWhen="down" vsLabel={t("dashboard.vsPrevPeriod")} />}
           icon={Users}
-          iconBgClass="bg-amber-500/15 border border-amber-500/20"
+          iconBgClass="bg-amber-500/10 border border-amber-500/20"
           iconColorClass="text-amber-600 dark:text-amber-400"
         />
       </div>
@@ -288,8 +288,8 @@ export function Dashboard() {
       {/* Charts Section */}
       <Suspense fallback={
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="rounded-2xl"><CardContent className="p-10"><div className="w-8 h-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin mx-auto" /></CardContent></Card>
-          <Card className="rounded-2xl"><CardContent className="p-10"><div className="w-8 h-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin mx-auto" /></CardContent></Card>
+          <Card className="rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90"><CardContent className="p-10"><div className="w-8 h-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin mx-auto" /></CardContent></Card>
+          <Card className="rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90"><CardContent className="p-10"><div className="w-8 h-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin mx-auto" /></CardContent></Card>
         </div>
       }>
         <DashboardCharts 
@@ -302,21 +302,24 @@ export function Dashboard() {
       </Suspense>
 
       {/* Violation Types Breakdown */}
-      <Card className="rounded-2xl border-border/80 shadow-xs">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base sm:text-lg font-bold">{t("dashboard.violationTypes")}</CardTitle>
+      <Card className="rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.04)]">
+        <CardHeader className="pb-3 border-b border-neutral-100 dark:border-neutral-800/60">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold text-neutral-900 dark:text-white">
+            <AlertTriangle className="h-4 w-4 text-rose-500" />
+            {t("dashboard.violationTypes")}
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           <div className="space-y-3">
             {violationRows.map((item) => (
-              <div key={item.type} className="flex items-center justify-between p-3.5 sm:p-4 bg-muted/50 hover:bg-muted/80 border border-border/60 rounded-xl transition-colors">
+              <div key={item.type} className="flex items-center justify-between p-3.5 sm:p-4 bg-muted/30 hover:bg-muted/60 border border-neutral-200/60 dark:border-neutral-800/60 rounded-xl transition-colors">
                 <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 bg-rose-500 rounded-full shadow-xs"></div>
+                  <div className="w-2.5 h-2.5 bg-rose-500 rounded-full shadow-xs"></div>
                   <span className="font-semibold text-sm text-foreground">{item.type}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xl sm:text-2xl font-extrabold tracking-tight text-foreground">{item.count}</span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-background border border-border text-muted-foreground">
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                     {item.percentage}%
                   </span>
                 </div>

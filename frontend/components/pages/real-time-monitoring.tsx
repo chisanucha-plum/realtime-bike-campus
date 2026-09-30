@@ -21,7 +21,7 @@ import { toast } from "sonner"
 import { useRealTimeDetections } from "@/hooks/useRealTimeDetections"
 import { useHelmetStats } from "@/hooks/useHelmetStats"
 import { useLanguage } from "@/hooks/useLanguage"
-import { loadDisplayPrefs } from "@/lib/app-settings"
+import { loadDisplayPrefs, HELMET_SETTINGS_UPDATED_EVENT } from "@/lib/app-settings"
 import { playViolationBeep } from "@/lib/alert-sound"
 import { getStreamUrl } from "@/services/helmet-detection.service"
 import { DetectionList } from "@/components/real-time/DetectionList"
@@ -327,7 +327,15 @@ export function RealTimeMonitoring() {
   const cameraLabel = t("camera.camera1")
 
   // Client-effective preferences from the settings page (localStorage-backed)
-  const [prefs] = useState(loadDisplayPrefs)
+  const [prefs, setPrefs] = useState(loadDisplayPrefs)
+
+  useEffect(() => {
+    const handleSettingsUpdated = () => {
+      setPrefs(loadDisplayPrefs())
+    }
+    window.addEventListener(HELMET_SETTINGS_UPDATED_EVENT, handleSettingsUpdated)
+    return () => window.removeEventListener(HELMET_SETTINGS_UPDATED_EVENT, handleSettingsUpdated)
+  }, [])
 
   // Real today stats from database
   const { stats: todayStats, isStatsLoading, refetch: refetchStats } = useHelmetStats("today")

@@ -1,4 +1,5 @@
 import { memo } from "react"
+import { Shield, TrendingUp } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Area,
@@ -14,6 +15,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+
+const CARD_CLASS = "rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.04)]"
+const CARD_HEADER_CLASS = "pb-3 border-b border-neutral-100 dark:border-neutral-800/60"
+const CARD_TITLE_CLASS = "flex items-center gap-2 text-base font-semibold text-neutral-900 dark:text-white"
 
 const tooltipStyle = {
   backgroundColor: "var(--popover)",
@@ -62,13 +67,16 @@ const DashboardCharts = memo(function DashboardCharts({
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
         {/* Violations Trend Chart */}
-        <Card className="rounded-2xl border-border/80 shadow-xs">
-          <CardHeader className="pb-3">
+        <Card className={CARD_CLASS}>
+          <CardHeader className={CARD_HEADER_CLASS}>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base sm:text-lg font-bold">{complianceByDayLabel}</CardTitle>
+              <CardTitle className={CARD_TITLE_CLASS}>
+                <TrendingUp className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                {complianceByDayLabel}
+              </CardTitle>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <ResponsiveContainer width="100%" height={280} debounce={50}>
               <AreaChart data={chartData} margin={chartMargin}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
@@ -115,11 +123,14 @@ const DashboardCharts = memo(function DashboardCharts({
         </Card>
 
         {/* Helmet Compliance Pie Chart */}
-        <Card className="rounded-2xl border-border/80 shadow-xs">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base sm:text-lg font-bold">{helmetComplianceLabel}</CardTitle>
+        <Card className={CARD_CLASS}>
+          <CardHeader className={CARD_HEADER_CLASS}>
+            <CardTitle className={CARD_TITLE_CLASS}>
+              <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              {helmetComplianceLabel}
+            </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <ResponsiveContainer width="100%" height={240} debounce={50}>
               <PieChart>
                 <Pie

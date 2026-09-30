@@ -5,7 +5,7 @@ import { AlertCircle, Download, History as HistoryIcon, RotateCw, SlidersHorizon
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -21,6 +21,10 @@ import { fetchHelmetHistory } from "@/services/helmet-detection.service"
 import type { DetectionResult } from "@/types/detection.types"
 
 const HISTORY_LIMIT = 500
+
+const CARD_CLASS = "rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.04)]"
+const CARD_HEADER_CLASS = "pb-3 border-b border-neutral-100 dark:border-neutral-800/60"
+const CARD_TITLE_CLASS = "flex items-center gap-2 text-base font-semibold text-neutral-900 dark:text-white"
 
 type StatusFilter = "all" | "violation" | "compliant" | "overCapacity"
 
@@ -91,18 +95,18 @@ export function HistoryPage() {
         <Button
           variant="outline"
           size="sm"
-          className="gap-2 rounded-xl bg-card border-border/80 shadow-xs hover:bg-muted"
+          className="gap-2 rounded-xl bg-card border-neutral-200/80 dark:border-neutral-800/80 shadow-xs hover:bg-muted"
           onClick={exportCsv}
           disabled={filtered.length === 0}
         >
-          <Download className="h-4 w-4" />
+          <Download className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
           {t("history.exportCsv")}
         </Button>
       </div>
 
       {/* Error Notice */}
       {error && (
-        <div className="bg-destructive/10 border border-destructive/20 rounded-2xl p-4 flex items-start justify-between gap-3">
+        <div className="bg-destructive/10 border border-destructive/20 rounded-2xl p-4 flex items-start justify-between gap-3 shadow-xs">
           <div className="flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
             <p className="text-sm text-foreground">{error.message}</p>
@@ -115,12 +119,12 @@ export function HistoryPage() {
       )}
 
       {/* Filter Toolbar */}
-      <Card className="rounded-2xl border-border/80 shadow-xs bg-card/90 backdrop-blur-md">
+      <Card className={CARD_CLASS}>
         <CardContent className="flex flex-col sm:flex-row sm:items-center gap-3 p-3.5 sm:p-4">
           <div className="flex items-center gap-2">
-            <SlidersHorizontal className="w-4 h-4 text-muted-foreground hidden sm:inline" />
+            <SlidersHorizontal className="w-4 h-4 text-neutral-500 dark:text-neutral-400 hidden sm:inline" />
             <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-              <SelectTrigger className="w-full sm:w-[200px] rounded-xl">
+              <SelectTrigger className="w-full sm:w-[200px] rounded-xl border-neutral-200/80 dark:border-neutral-800/80 shadow-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-xl">
@@ -136,7 +140,7 @@ export function HistoryPage() {
             type="date"
             value={dayFilter}
             onChange={(event) => setDayFilter(event.target.value)}
-            className="w-full sm:w-[170px] rounded-xl"
+            className="w-full sm:w-[170px] rounded-xl border-neutral-200/80 dark:border-neutral-800/80 shadow-xs"
             aria-label={t("history.dayFilter")}
           />
 
@@ -152,28 +156,38 @@ export function HistoryPage() {
           )}
 
           <div className="sm:ml-auto flex items-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/60">
-            <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-muted border border-border/80 text-foreground">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-muted/80 border border-neutral-200/80 dark:border-neutral-800/80 text-foreground">
               {filtered.length} / {detections.length}
             </span>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
               {t("history.violationsBadge")}: {violationCount}
             </span>
           </div>
         </CardContent>
       </Card>
 
-      {/* Detection List Container */}
-      <div className="relative min-h-[200px]">
-        {!isLoading && <DetectionList detections={filtered} t={t} />}
-        {isLoading && (
-          <div className="flex items-center justify-center py-16">
-            <div className="flex flex-col items-center gap-3 text-muted-foreground">
-              <div className="w-10 h-10 border-3 border-primary/20 border-t-primary rounded-full animate-spin" />
-              <p className="text-sm font-medium">{t("common.loading")}</p>
-            </div>
+      {/* Detection List Container - Styled Card matching Realtime Monitoring */}
+      <Card className={CARD_CLASS}>
+        <CardHeader className={CARD_HEADER_CLASS}>
+          <CardTitle className={CARD_TITLE_CLASS}>
+            <HistoryIcon className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
+            {t("history.title")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-4">
+          <div className="relative min-h-[200px]">
+            {!isLoading && <DetectionList detections={filtered} t={t} />}
+            {isLoading && (
+              <div className="flex items-center justify-center py-16">
+                <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                  <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                  <p className="text-xs font-medium">{t("common.loading")}</p>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }
