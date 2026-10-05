@@ -8,10 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from datetime import datetime
+
 from app.configuration import Configuration
 from app.core.exceptions import ServiceError
-from app.database.database import init_database
+from app.database.database import SessionLocal, init_database
 from app.routers.router import get_router
+from app.services.email_service import send_daily_digest
 from app.services.frame_storage import frame_storage
 
 config = Configuration.get_config().server
@@ -36,15 +39,41 @@ async def periodic_frame_cleanup() -> None:
             logger.exception("Frame cleanup failed")
 
 
+async def periodic_daily_digest() -> None:
+    """Check every 30 seconds if it's time to send daily digest to Security Chief."""
+    last_sent_date: str | None = None
+    while True:
+        try:
+            await asyncio.sleep(30)
+            smtp_cfg = Configuration.get_config().smtp
+            if not smtp_cfg or not smtp_cfg.digest_enabled or not smtp_cfg.security_chief_email:
+                continue
+
+            now = datetime.now()
+            today_str = now.strftime("%Y-%m-%d")
+            current_hm = now.strftime("%H:%M")
+
+            if current_hm == smtp_cfg.digest_time and last_sent_date != today_str:
+                with SessionLocal() as db:
+                    logger.info("Executing scheduled daily digest email to security chief")
+                    send_daily_digest(db)
+                last_sent_date = today_str
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("Error running periodic daily digest scheduler")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan context manager.
 
     Handles startup and shutdown events:
-    - Startup: Initialize database tables, start frame cleanup task
-    - Shutdown: Cancel frame cleanup task
+    - Startup: Initialize database tables, start frame cleanup task, start digest scheduler
+    - Shutdown: Cancel background tasks
     """
     cleanup_task: asyncio.Task[None] | None = None
+    digest_task: asyncio.Task[None] | None = None
 
     try:
         logger.info("Initializing database")
@@ -56,17 +85,21 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
             f"Frame cleanup task started (retention: {FRAME_RETENTION_DAYS} days)"
         )
 
+        digest_task = asyncio.create_task(periodic_daily_digest())
+        logger.info("Daily digest scheduler started")
+
     except SQLAlchemyError as e:
         logger.warning(f"Database initialization skipped: {e}")
 
     yield
 
-    if cleanup_task:
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
+    for task in (cleanup_task, digest_task):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 # FastAPI app
@@ -109,6 +142,7 @@ app.add_middleware(
 )
 
 app.include_router(get_router())
+app.include_router(get_router(), prefix="/api")
 
 
 if __name__ == "__main__":

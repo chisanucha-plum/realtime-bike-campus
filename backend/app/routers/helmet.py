@@ -14,10 +14,13 @@ from app.database.history_status import HistoryStatus
 from app.schemas.helmet import (
     HelmetStatsResponse,
     HistoryStatusResponse,
+    SendDigestRequest,
+    SendDigestResponse,
     StatsBucketResponse,
     StatsSummaryResponse,
     ViolationTypeCount,
 )
+from app.services import email_service
 from app.services.camera_hub import get_camera_hub
 from app.services.frame_storage import frame_storage
 
@@ -307,3 +310,29 @@ async def get_frame(date: str, filename: str) -> FileResponse:
 
     logger.debug(f"Serving frame: {filepath}")
     return FileResponse(filepath, media_type="image/jpeg")
+
+
+@router.post("/send-digest", response_model=SendDigestResponse)
+async def send_helmet_digest(
+    request: SendDigestRequest | None = None,
+    db: Session = Depends(get_db),
+) -> SendDigestResponse:
+    """Send or dry-run daily security digest email to Security Chief."""
+    recipient = request.recipient_email if request else None
+    try:
+        result = email_service.send_daily_digest(db, recipient_email=recipient)
+        return SendDigestResponse(
+            success=True,
+            status=result["status"],
+            message=result["message"],
+            recipient=result.get("recipient"),
+            summary=result.get("summary"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Unexpected error sending daily digest")
+        raise HTTPException(status_code=500, detail=f"Failed to process daily digest: {e}") from e
+

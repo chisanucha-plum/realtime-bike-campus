@@ -1,7 +1,7 @@
 """Unit tests for CameraHub video-source handling."""
 
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import cv2
 
@@ -14,7 +14,6 @@ def make_settings(**overrides) -> ApplicationSettingsConfig:
     values = dict(video_path="src/case/case_03.mp4", use_webcam=False, webcam_id=0)
     values.update(overrides)
     return ApplicationSettingsConfig(**values)
-
 
 
 class TestIsStreamUrl:

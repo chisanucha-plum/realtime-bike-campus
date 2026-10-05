@@ -229,6 +229,56 @@ class Key:
 
 
 @dataclass
+class SmtpConfig:
+    """SMTP, Resend API, and daily digest configuration."""
+
+    host: str
+    port: int
+    user: str
+    password: str
+    from_email: str
+    security_chief_email: str
+    digest_enabled: bool
+    digest_time: str
+    api_key: str = ""
+
+    @staticmethod
+    def from_dict(data: dict) -> "SmtpConfig":
+        port_raw = os.environ.get("SMTP_PORT") or data.get("port", 587)
+        try:
+            port = int(port_raw)
+        except (ValueError, TypeError):
+            port = 587
+
+        digest_enabled_env = os.environ.get("DIGEST_ENABLED", "").strip().lower()
+        if digest_enabled_env in ("true", "1", "yes"):
+            digest_enabled = True
+        elif digest_enabled_env in ("false", "0", "no"):
+            digest_enabled = False
+        else:
+            digest_enabled = bool(data.get("digest_enabled", False))
+
+        api_key = os.environ.get("RESEND_API_KEY") or str(data.get("api_key", ""))
+
+        return SmtpConfig(
+            host=os.environ.get("SMTP_HOST") or str(data.get("host", "")),
+            port=port,
+            user=os.environ.get("SMTP_USER") or str(data.get("user", "")),
+            password=os.environ.get("SMTP_PASSWORD") or str(data.get("password", "")),
+            from_email=os.environ.get("RESEND_FROM")
+            or os.environ.get("SMTP_FROM")
+            or os.environ.get("SMTP_USER")
+            or str(data.get("from_email", "")),
+            security_chief_email=os.environ.get("SECURITY_CHIEF_EMAIL")
+            or str(data.get("security_chief_email", "")),
+            digest_enabled=digest_enabled,
+            digest_time=os.environ.get("DIGEST_TIME")
+            or str(data.get("digest_time", "18:00")),
+            api_key=api_key,
+        )
+
+
+@dataclass
 class Configuration:
     models: ModelSettingsConfig
     application_settings: ApplicationSettingsConfig
@@ -237,6 +287,7 @@ class Configuration:
     refresh_token_cookie: RefreshTokenCookie
     key: Key
     detection: DetectionConfig
+    smtp: SmtpConfig | None = None
 
     @staticmethod
     def from_dict(data: dict) -> "Configuration":
@@ -252,6 +303,7 @@ class Configuration:
             ),
             key=Key.from_dict(data["key"]),
             detection=DetectionConfig.from_dict(data.get("detection", {})),
+            smtp=SmtpConfig.from_dict(data.get("smtp") or {}),
         )
 
     @staticmethod

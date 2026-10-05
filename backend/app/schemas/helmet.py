@@ -57,3 +57,20 @@ class HelmetStatsResponse(BaseModel):
     summary: StatsSummaryResponse
     series: list[StatsBucketResponse]
     violation_types: list[ViolationTypeCount]
+
+
+class SendDigestRequest(BaseModel):
+    """Request schema for on-demand daily digest triggering."""
+
+    recipient_email: Optional[str] = None
+
+
+class SendDigestResponse(BaseModel):
+    """Response schema for on-demand daily digest triggering."""
+
+    success: bool
+    status: str
+    message: str
+    recipient: Optional[str] = None
+    summary: Optional[dict] = None
+

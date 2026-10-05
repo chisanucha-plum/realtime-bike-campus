@@ -43,5 +43,16 @@
     "max_age": 2592000,
     "path": "/",
     "domain": null
+  },
+  "smtp": {
+    "api_key": "your-resend-api-key-here",
+    "host": "",
+    "port": 587,
+    "user": "",
+    "password": "",
+    "from_email": "onboarding@resend.dev",
+    "security_chief_email": "security-chief@university.ac.th",
+    "digest_enabled": false,
+    "digest_time": "18:00"
   }
 }
