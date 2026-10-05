@@ -34,6 +34,42 @@ const lineChartDot = { fill: "var(--chart-1)", strokeWidth: 2, r: 3 }
 const chartMargin = { top: 10, right: 10, left: -20, bottom: 0 }
 const complianceChartMargin = { top: 10, right: 10, left: -10, bottom: 0 }
 
+interface CustomTickProps {
+  x?: number
+  y?: number
+  payload?: { value: string | number }
+  className?: string
+}
+
+const renderXAxisTick = (props: CustomTickProps): React.ReactElement<SVGElement> => (
+  <text
+    x={props.x ?? 0}
+    y={props.y ?? 0}
+    dy={12}
+    textAnchor="middle"
+    fill="var(--muted-foreground)"
+    fontSize={11}
+    className={props.className || "recharts-cartesian-axis-tick-value"}
+  >
+    {props.payload?.value}
+  </text>
+)
+
+const renderYAxisTick = (props: CustomTickProps): React.ReactElement<SVGElement> => (
+  <text
+    x={props.x ?? 0}
+    y={props.y ?? 0}
+    dx={-4}
+    dy={4}
+    textAnchor="end"
+    fill="var(--muted-foreground)"
+    fontSize={11}
+    className={props.className || "recharts-cartesian-axis-tick-value"}
+  >
+    {props.payload?.value}
+  </text>
+)
+
 interface DashboardChartsProps {
   chartData: Array<{
     name: string
@@ -77,9 +113,9 @@ const DashboardCharts = memo(function DashboardCharts({
             </div>
           </CardHeader>
           <CardContent className="pt-4">
-            <ResponsiveContainer width="100%" height={280} debounce={50}>
+            <ResponsiveContainer width="100%" height={280} initialDimension={{ width: 500, height: 280 }} debounce={50}>
               <AreaChart data={chartData} margin={chartMargin}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} vertical={false} />
                 <XAxis 
                   dataKey="name" 
                   stroke="var(--muted-foreground)" 
@@ -87,12 +123,14 @@ const DashboardCharts = memo(function DashboardCharts({
                   tickLine={false}
                   minTickGap={25}
                   interval="preserveStartEnd"
+                  tick={renderXAxisTick}
                 />
                 <YAxis 
                   stroke="var(--muted-foreground)" 
                   fontSize={11}
                   tickLine={false}
                   axisLine={false}
+                  tick={renderYAxisTick}
                 />
                 <Tooltip
                   contentStyle={tooltipStyle}
@@ -131,7 +169,7 @@ const DashboardCharts = memo(function DashboardCharts({
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-4">
-            <ResponsiveContainer width="100%" height={240} debounce={50}>
+            <ResponsiveContainer width="100%" height={240} initialDimension={{ width: 400, height: 240 }} debounce={50}>
               <PieChart>
                 <Pie
                   data={helmetPieData}
@@ -172,9 +210,9 @@ const DashboardCharts = memo(function DashboardCharts({
           <CardTitle className="text-base sm:text-lg font-bold">{labels.complianceRate}</CardTitle>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={240} debounce={50}>
+          <ResponsiveContainer width="100%" height={240} initialDimension={{ width: 500, height: 240 }} debounce={50}>
             <LineChart data={chartData} margin={complianceChartMargin}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.6} vertical={false} />
               <XAxis 
                 dataKey="name" 
                 stroke="var(--muted-foreground)" 
@@ -182,6 +220,7 @@ const DashboardCharts = memo(function DashboardCharts({
                 tickLine={false}
                 minTickGap={25}
                 interval="preserveStartEnd"
+                tick={renderXAxisTick}
               />
               <YAxis 
                 stroke="var(--muted-foreground)" 
@@ -189,6 +228,7 @@ const DashboardCharts = memo(function DashboardCharts({
                 domain={[0, 100]}
                 tickLine={false}
                 axisLine={false}
+                tick={renderYAxisTick}
               />
               <Tooltip
                 contentStyle={tooltipStyle}

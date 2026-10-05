@@ -72,35 +72,24 @@ export function useHelmetStats(range: StatsTimeRange): UseHelmetStatsReturn {
       setError(null)
 
       try {
-        const currentStats = await fetchHelmetStats(
-          current.from,
-          current.to,
-          current.bucket
-        )
-        if (!cancelled) setStats(currentStats)
+        const [currentStats, prevStats] = await Promise.all([
+          fetchHelmetStats(current.from, current.to, current.bucket),
+          fetchHelmetStats(previous.from, previous.to, previous.bucket),
+        ])
+        if (!cancelled) {
+          setStats(currentStats)
+          setPreviousStats(prevStats)
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err : new Error("Failed to load stats"))
-          console.error("Error loading current helmet stats:", err)
+          console.error("Error loading helmet stats:", err)
         }
       } finally {
-        if (!cancelled) setIsStatsLoading(false)
-      }
-
-      try {
-        const prevStats = await fetchHelmetStats(
-          previous.from,
-          previous.to,
-          previous.bucket
-        )
-        if (!cancelled) setPreviousStats(prevStats)
-      } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err : new Error("Failed to load previous stats"))
-          console.error("Error loading previous helmet stats:", err)
+          setIsStatsLoading(false)
+          setIsPreviousLoading(false)
         }
-      } finally {
-        if (!cancelled) setIsPreviousLoading(false)
       }
     }
 
