@@ -17,17 +17,29 @@ import { API_BASE_URL, CAMERA_NAME } from "@/lib/api/config"
 interface RawDetection {
   helmet_status: boolean
   passenger_count?: number
+  over_capacity?: boolean
   violation?: boolean
   frame_path?: string
+  track_id?: number
+  motorcycle_track_id?: string | number
 }
 
-function toDetectionResult(item: RawDetection, id: string, timestamp: string): DetectionResult {
+function toDetectionResult(
+  item: RawDetection,
+  id: string,
+  timestamp: string,
+  trackId?: number | string
+): DetectionResult {
   return {
     id,
+    trackId: trackId ?? item.track_id ?? item.motorcycle_track_id,
     timestamp,
     camera: CAMERA_NAME,
     helmetStatus: item.helmet_status === true ? "wearing" : "not-wearing",
     passengerCount: item.passenger_count ?? 1,
+    overCapacity:
+      item.over_capacity ??
+      (item.passenger_count !== undefined ? item.passenger_count > 2 : false),
     violation: item.violation ?? false,
     framePath: item.frame_path,
   }

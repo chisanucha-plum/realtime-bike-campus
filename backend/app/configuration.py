@@ -272,8 +272,10 @@ class SmtpConfig:
             security_chief_email=os.environ.get("SECURITY_CHIEF_EMAIL")
             or str(data.get("security_chief_email", "")),
             digest_enabled=digest_enabled,
-            digest_time=os.environ.get("DIGEST_TIME")
-            or str(data.get("digest_time", "18:00")),
+            digest_time=(
+                os.environ.get("DIGEST_TIME")
+                or str(data.get("digest_time", "18:00"))
+            ).strip()[:5],
             api_key=api_key,
         )
 

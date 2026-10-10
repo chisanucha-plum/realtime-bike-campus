@@ -7,8 +7,10 @@ Supports:
 """
 
 import base64
-from datetime import date
+import csv
+from datetime import date, timedelta
 from email.message import EmailMessage
+import io
 import json
 import logging
 from pathlib import Path
@@ -28,16 +30,17 @@ logger = logging.getLogger(__name__)
 
 def calculate_daily_digest_stats(
     db: Session, target_date: date | None = None
-) -> tuple[dict[str, Any], list[Path]]:
-    """Aggregate detection statistics for a given day and collect sample violation snapshots."""
+) -> tuple[dict[str, Any], list[Path], list[HistoryStatus]]:
+    """Aggregate detection statistics for a given day, collect sample violation snapshots, and history rows."""
     target_date = target_date or date.today()
     day_str = target_date.isoformat()
+    next_day_str = (target_date + timedelta(days=1)).isoformat()
 
     rows: list[HistoryStatus] = (
         db.query(HistoryStatus)
         .filter(
             HistoryStatus.timestamp >= f"{day_str} 00:00:00",
-            HistoryStatus.timestamp <= f"{day_str} 23:59:59",
+            HistoryStatus.timestamp < f"{next_day_str} 00:00:00",
         )
         .order_by(HistoryStatus.timestamp.asc())
         .all()
@@ -55,13 +58,18 @@ def calculate_daily_digest_stats(
     # Calculate peak violation hour
     hour_counts: dict[str, int] = {}
     for r in rows:
-        if r.violation and r.timestamp and len(r.timestamp) >= 13:
+        if (
+            r.violation
+            and r.timestamp
+            and len(r.timestamp) >= 13
+            and r.timestamp[11:13].isdigit()
+        ):
             hour = r.timestamp[11:13]
             hour_counts[hour] = hour_counts.get(hour, 0) + 1
 
     if hour_counts:
         peak_h = max(hour_counts, key=hour_counts.get)
-        peak_hour_str = f"{peak_h}:00 - {int(peak_h)+1:02d}:00 ({hour_counts[peak_h]} ครั้ง)"
+        peak_hour_str = f"{peak_h}:00 - {(int(peak_h)+1) % 24:02d}:00 ({hour_counts[peak_h]} ครั้ง)"
     else:
         peak_hour_str = "ไม่มีการกระทำผิด (0 ครั้ง)"
 
@@ -89,7 +97,42 @@ def calculate_daily_digest_stats(
         "snapshots_count": len(valid_snapshot_paths),
     }
 
-    return stats, valid_snapshot_paths
+    return stats, valid_snapshot_paths, rows
+
+
+def generate_daily_digest_csv(rows: list[HistoryStatus]) -> str:
+    """Generate CSV text with UTF-8 BOM, standardized columns starting with timestamp."""
+    output = io.StringIO()
+    # Write UTF-8 BOM so Excel opens Thai characters correctly
+    output.write("\ufeff")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow([
+        "timestamp",
+        "track_id",
+        "helmet_status",
+        "passenger_count",
+        "over_capacity",
+        "violation",
+        "frame_path",
+    ])
+
+    for r in rows:
+        helmet_str = (
+            "helmet on"
+            if r.helmet_status is True
+            else ("helmet off" if r.helmet_status is False else "unknown")
+        )
+        writer.writerow([
+            r.timestamp or "",
+            r.track_id if r.track_id is not None else "",
+            helmet_str,
+            r.passenger_count if r.passenger_count is not None else 0,
+            "yes" if r.over_capacity else "no",
+            "yes" if r.violation else "no",
+            r.frame_path or "",
+        ])
+
+    return output.getvalue()
 
 
 def generate_daily_digest_text(stats: dict[str, Any]) -> str:
@@ -220,15 +263,21 @@ def generate_daily_digest_html(
 """
 
 
+def digest_subject(stats: dict[str, Any]) -> str:
+    """Subject line shared by the SMTP and Resend delivery paths."""
+    return f"[Helmet Alert] รายงานสรุปความปลอดภัยประจำวัน - วันที่ {stats['date']}"
+
+
 def build_daily_digest_message(
     stats: dict[str, Any],
     snapshot_paths: list[Path],
     from_email: str,
     to_email: str,
+    csv_content: str | None = None,
 ) -> EmailMessage:
-    """Build a multipart MIME email message with HTML summary and snapshot attachments."""
+    """Build a multipart MIME email message with HTML summary, snapshot attachments, and CSV report."""
     msg = EmailMessage()
-    msg["Subject"] = f"[Helmet Alert] รายงานสรุปความปลอดภัยประจำวัน - วันที่ {stats['date']}"
+    msg["Subject"] = digest_subject(stats)
     msg["From"] = from_email or "helmet-detection-system@local"
     msg["To"] = to_email
 
@@ -253,6 +302,16 @@ def build_daily_digest_message(
         except Exception as e:
             logger.warning(f"Could not attach snapshot {path}: {e}")
 
+    # Attach CSV report
+    if csv_content:
+        csv_filename = f"helmet-digest-{stats['date']}.csv"
+        msg.add_attachment(
+            csv_content.encode("utf-8"),
+            maintype="text",
+            subtype="csv",
+            filename=csv_filename,
+        )
+
     return msg
 
 
@@ -263,6 +322,8 @@ def send_via_resend(
     subject: str,
     html: str,
     snapshot_paths: list[Path],
+    csv_content: str | None = None,
+    csv_filename: str | None = None,
 ) -> dict[str, Any]:
     """Send email via Resend REST API over HTTPS port 443 (firewall-safe)."""
     payload: dict[str, Any] = {
@@ -272,8 +333,8 @@ def send_via_resend(
         "html": html,
     }
 
+    attachments: list[dict[str, Any]] = []
     if snapshot_paths:
-        attachments = []
         for idx, path in enumerate(snapshot_paths):
             try:
                 with open(path, "rb") as f:
@@ -287,8 +348,19 @@ def send_via_resend(
                 )
             except Exception as e:
                 logger.warning(f"Could not read attachment {path} for Resend: {e}")
-        if attachments:
-            payload["attachments"] = attachments
+
+    if csv_content:
+        fname = csv_filename or "helmet-digest.csv"
+        b64_csv = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
+        attachments.append(
+            {
+                "filename": fname,
+                "content": b64_csv,
+            }
+        )
+
+    if attachments:
+        payload["attachments"] = attachments
 
     req = urllib.request.Request(
         "https://api.resend.com/emails",
@@ -337,21 +409,21 @@ def send_daily_digest(
     if not target_recipient:
         raise ValueError("Recipient email is not configured. Please provide an email address.")
 
-    stats, snapshot_paths = calculate_daily_digest_stats(db, target_date)
+    stats, snapshot_paths, rows = calculate_daily_digest_stats(db, target_date)
+    csv_content = generate_daily_digest_csv(rows)
+    csv_filename = f"helmet-digest-{stats['date']}.csv"
 
     # 1. Resend API via HTTPS (Port 443)
     if config and config.api_key:
-        from_email = config.from_email or "onboarding@resend.dev"
-        subject = f"[Helmet Alert] รายงานสรุปความปลอดภัยประจำวัน - วันที่ {stats['date']}"
-        html_content = generate_daily_digest_html(stats, snapshot_paths)
-
         res = send_via_resend(
             api_key=config.api_key,
-            from_email=from_email,
+            from_email=config.from_email or "onboarding@resend.dev",
             to_email=target_recipient,
-            subject=subject,
-            html=html_content,
+            subject=digest_subject(stats),
+            html=generate_daily_digest_html(stats, snapshot_paths),
             snapshot_paths=snapshot_paths,
+            csv_content=csv_content,
+            csv_filename=csv_filename,
         )
         msg_id = res.get("id", "ok")
         logger.info(f"Resend email sent successfully to {target_recipient}, id={msg_id}")
@@ -370,10 +442,12 @@ def send_daily_digest(
             snapshot_paths=snapshot_paths,
             from_email=from_email,
             to_email=target_recipient,
+            csv_content=csv_content,
         )
         try:
-            with smtplib.SMTP(config.host, config.port, timeout=10) as server:
-                if config.port == 587:
+            smtp_cls = smtplib.SMTP_SSL if config.port == 465 else smtplib.SMTP
+            with smtp_cls(config.host, config.port, timeout=10) as server:
+                if config.port != 465:
                     server.starttls()
                 if config.user and config.password:
                     server.login(config.user, config.password)

@@ -63,7 +63,7 @@ export function HistoryPage() {
       if (dayFilter && dayOf(detection) !== dayFilter) return false
       if (statusFilter === "violation") return detection.violation
       if (statusFilter === "compliant") return !detection.violation
-      if (statusFilter === "overCapacity") return detection.passengerCount > 2
+      if (statusFilter === "overCapacity") return Boolean(detection.overCapacity)
       return true
     })
   }, [detections, statusFilter, dayFilter])
@@ -73,11 +73,12 @@ export function HistoryPage() {
       `helmet-history-${new Date().toISOString().slice(0, 10)}.csv`,
       filtered.map((detection) => ({
         timestamp: detection.timestamp,
-        helmet: detection.helmetStatus,
-        passengers: detection.passengerCount,
-        overCapacity: detection.passengerCount > 2 ? "yes" : "no",
+        track_id: detection.trackId ?? "",
+        helmet_status: detection.helmetStatus === "wearing" ? "helmet on" : "helmet off",
+        passenger_count: detection.passengerCount,
+        over_capacity: detection.overCapacity ? "yes" : "no",
         violation: detection.violation ? "yes" : "no",
-        frame: detection.framePath ?? "",
+        frame_path: detection.framePath ?? "",
       }))
     )
   }

@@ -10,6 +10,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+
 
 class FrameStorage:
     """Save frames to disk with organized directory structure."""
@@ -20,7 +22,8 @@ class FrameStorage:
         Args:
             base_dir: Base directory for storing frames (default: frames_storage)
         """
-        self.base_dir = Path(base_dir)
+        # Anchor relative paths to backend/ so the location doesn't depend on CWD
+        self.base_dir = BACKEND_DIR / base_dir
         self.base_dir.mkdir(exist_ok=True)
         logger.info(f"Frame storage initialized at {self.base_dir}")
 

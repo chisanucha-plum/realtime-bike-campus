@@ -1,6 +1,6 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class HistoryStatusResponse(BaseModel):
@@ -62,7 +62,7 @@ class HelmetStatsResponse(BaseModel):
 class SendDigestRequest(BaseModel):
     """Request schema for on-demand daily digest triggering."""
 
-    recipient_email: Optional[str] = None
+    recipient_email: Optional[EmailStr] = None
 
 
 class SendDigestResponse(BaseModel):

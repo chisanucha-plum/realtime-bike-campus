@@ -1,14 +1,13 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
-
-from datetime import datetime
 
 from app.configuration import Configuration
 from app.core.exceptions import ServiceError
@@ -54,9 +53,12 @@ async def periodic_daily_digest() -> None:
             current_hm = now.strftime("%H:%M")
 
             if current_hm == smtp_cfg.digest_time and last_sent_date != today_str:
-                with SessionLocal() as db:
-                    logger.info("Executing scheduled daily digest email to security chief")
-                    send_daily_digest(db)
+                def _run_digest() -> None:
+                    with SessionLocal() as db:
+                        logger.info("Executing scheduled daily digest email to security chief")
+                        send_daily_digest(db)
+
+                await asyncio.to_thread(_run_digest)
                 last_sent_date = today_str
         except asyncio.CancelledError:
             break
@@ -142,7 +144,6 @@ app.add_middleware(
 )
 
 app.include_router(get_router())
-app.include_router(get_router(), prefix="/api")
 
 
 if __name__ == "__main__":

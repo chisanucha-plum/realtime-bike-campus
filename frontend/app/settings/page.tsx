@@ -22,6 +22,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import {
   AUTH_USER_UPDATED_EVENT,
+  createAuthHeadersFromStore,
   getStoredCurrentUser,
 } from "@/stores/auth-store"
 import { useLanguage } from "@/hooks/useLanguage"
@@ -231,7 +232,7 @@ export default function SettingsPage() {
   const handleTestSendDigest = useCallback(async () => {
     const targetEmail = settings.securityChiefEmail.trim() || settings.email.trim()
     if (!targetEmail) {
-      toast.error("กรุณาระบุอีเมลหัวหน้ารปภ. ก่อนทดสอบส่ง")
+      toast.error(t("settings.recipientRequired") || "กรุณาระบุอีเมลหัวหน้ารปภ. ก่อนทดสอบส่ง")
       return
     }
 
@@ -239,7 +240,10 @@ export default function SettingsPage() {
     try {
       const res = await fetch(`${API_BASE_URL}/helmet/send-digest`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          ...createAuthHeadersFromStore(),
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ recipient_email: targetEmail }),
       })
       const data = await res.json()
@@ -409,7 +413,7 @@ const UserProfileCard = memo(function UserProfileCard({
               {t("settings.email")}
             </Label>
             <span className="text-[11px] text-muted-foreground">
-              (ระบบยืนยันจากบัญชีผู้ใช้)
+              {t("settings.accountVerified") || "(ระบบยืนยันจากบัญชีผู้ใช้)"}
             </span>
           </div>
           <Input
@@ -586,6 +590,9 @@ const NotificationsCard = memo(function NotificationsCard({
 
           {notifyEmail && (
             <div className="space-y-3 pt-2 border-t border-neutral-200/50 dark:border-neutral-800/50">
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.scheduledDigestServerNote") || "หมายเหตุ: ระบบส่งรายงานอัตโนมัติประจำวันทำงานตามการตั้งค่าบน Server (config.development.json / .env)"}
+              </p>
               <div className="space-y-1.5">
                 <Label
                   htmlFor="securityChiefEmail"
@@ -626,10 +633,10 @@ const NotificationsCard = memo(function NotificationsCard({
                     <SelectValue placeholder="เลือกเวลาส่งรายงาน" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
-                    <SelectItem value="18:00">18:00 น. (สิ้นสุดกะกลางวัน)</SelectItem>
-                    <SelectItem value="20:00">20:00 น. (สิ้นสุดกะค่ำ)</SelectItem>
-                    <SelectItem value="08:00">08:00 น. (สิ้นสุดกะดึก)</SelectItem>
-                    <SelectItem value="12:00">12:00 น. (กะเที่ยงวัน)</SelectItem>
+                    <SelectItem value="18:00">{t("settings.shiftDay") || "18:00 น. (สิ้นสุดกะกลางวัน)"}</SelectItem>
+                    <SelectItem value="20:00">{t("settings.shiftEvening") || "20:00 น. (สิ้นสุดกะค่ำ)"}</SelectItem>
+                    <SelectItem value="08:00">{t("settings.shiftNight") || "08:00 น. (สิ้นสุดกะดึก)"}</SelectItem>
+                    <SelectItem value="12:00">{t("settings.shiftNoon") || "12:00 น. (กะเที่ยงวัน)"}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -710,13 +717,13 @@ const RealtimeDisplayCard = memo(function RealtimeDisplayCard({
                 <SelectValue placeholder="จำนวนรายการ" />
               </SelectTrigger>
               <SelectContent className="rounded-xl">
-                <SelectItem value="10">10 รายการ</SelectItem>
-                <SelectItem value="20">20 รายการ</SelectItem>
-                <SelectItem value="50">50 รายการ</SelectItem>
+                <SelectItem value="10">{t("settings.itemsCount")?.replace("{count}", "10") || "10 รายการ"}</SelectItem>
+                <SelectItem value="20">{t("settings.itemsCount")?.replace("{count}", "20") || "20 รายการ"}</SelectItem>
+                <SelectItem value="50">{t("settings.itemsCount")?.replace("{count}", "50") || "50 รายการ"}</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              กำหนดจำนวนแถวสูงสุดในตาราง Real-time
+              {t("settings.maxRealtimeRowsDesc") || "กำหนดจำนวนแถวสูงสุดในตาราง Real-time"}
             </p>
           </div>
 
@@ -750,7 +757,7 @@ const RealtimeDisplayCard = memo(function RealtimeDisplayCard({
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              ใช้ระบบ Push Real-time (SSE Stream) ไม่จำเป็นต้องตั้ง Refresh Polling
+              {t("settings.pushRealtimeDesc") || "ใช้ระบบ Push Real-time (SSE Stream) ไม่จำเป็นต้องตั้ง Refresh Polling"}
             </p>
           </div>
         </div>

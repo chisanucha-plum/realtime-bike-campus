@@ -4,19 +4,23 @@
 
 export interface DetectionResult {
   id: string
+  trackId?: number | string
   timestamp: string
   camera: string
   helmetStatus: "wearing" | "not-wearing"
   passengerCount: number
+  overCapacity?: boolean
   violation: boolean
   framePath?: string  // Optional path to saved frame image
 }
 
 export interface DetectionHistoryItem {
   id: string
+  track_id?: number
   timestamp?: string
   helmet_status: boolean
   passenger_count?: number
+  over_capacity?: boolean
   violation?: boolean
   frame_path?: string  // Optional path to saved frame image
 }
@@ -25,6 +29,7 @@ export interface DetectionEvent {
   motorcycle_track_id: string
   helmet_status: boolean
   passenger_count?: number
+  over_capacity?: boolean
   violation?: boolean
   frame_path?: string
 }

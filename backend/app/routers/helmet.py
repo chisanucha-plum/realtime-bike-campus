@@ -9,8 +9,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from app.core.auth import get_any_user
 from app.database.database import get_db
 from app.database.history_status import HistoryStatus
+from app.database.user import User
 from app.schemas.helmet import (
     HelmetStatsResponse,
     HistoryStatusResponse,
@@ -316,11 +318,14 @@ async def get_frame(date: str, filename: str) -> FileResponse:
 async def send_helmet_digest(
     request: SendDigestRequest | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_any_user),
 ) -> SendDigestResponse:
     """Send or dry-run daily security digest email to Security Chief."""
-    recipient = request.recipient_email if request else None
+    recipient = str(request.recipient_email) if request and request.recipient_email else None
     try:
-        result = email_service.send_daily_digest(db, recipient_email=recipient)
+        result = await asyncio.to_thread(
+            email_service.send_daily_digest, db, recipient_email=recipient
+        )
         return SendDigestResponse(
             success=True,
             status=result["status"],
