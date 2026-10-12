@@ -219,6 +219,7 @@ class CameraHub:
                             violation=r.violation,
                             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             frame_path=frame_path,
+                            confidence=r.confidence,
                         )
                     )
                 db.commit()

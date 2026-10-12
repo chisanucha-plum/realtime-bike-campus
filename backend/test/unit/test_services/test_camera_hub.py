@@ -82,3 +82,16 @@ class TestPopLatestFrame:
 
         assert hub._pop_latest_frame() is frame
         assert hub._pop_latest_frame() is None
+
+
+def test_frame_cleanup_disabled_when_days_zero_or_negative(tmp_path):
+    from app.services.frame_storage import FrameStorage
+
+    storage = FrameStorage(base_dir=tmp_path)
+    test_file = tmp_path / "test.jpg"
+    test_file.write_text("dummy")
+
+    assert storage.cleanup_old_frames(days=0) == 0
+    assert test_file.exists()
+    assert storage.cleanup_old_frames(days=-1) == 0
+    assert test_file.exists()

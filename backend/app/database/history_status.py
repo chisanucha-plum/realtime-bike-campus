@@ -1,5 +1,5 @@
 from app.database.database import Base
-from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import Boolean, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -15,7 +15,8 @@ class HistoryStatus(Base):
     passenger_count: Mapped[int] = mapped_column(Integer, nullable=True)
     over_capacity: Mapped[bool] = mapped_column(Boolean, nullable=True)
     violation: Mapped[bool] = mapped_column(Boolean, nullable=True)
-    timestamp: Mapped[str] = mapped_column(String, nullable=True)
+    timestamp: Mapped[str] = mapped_column(String, nullable=True, index=True)
     frame_path: Mapped[str] = mapped_column(String, nullable=True)  # Path to saved frame image
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 

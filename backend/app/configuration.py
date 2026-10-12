@@ -45,6 +45,8 @@ class DetectionConfig:
     roi_top_pad: float
     roi_bottom_pad: float
     line_overlay_alpha: float
+    eval_window_frames: int = 3
+    early_exit_conf: float = 0.70
 
     @staticmethod
     def from_dict(data: dict) -> "DetectionConfig":
@@ -63,6 +65,8 @@ class DetectionConfig:
             roi_top_pad=data.get("roi_top_pad"),
             roi_bottom_pad=data.get("roi_bottom_pad"),
             line_overlay_alpha=data.get("line_overlay_alpha"),
+            eval_window_frames=data.get("eval_window_frames", 3),
+            early_exit_conf=data.get("early_exit_conf", 0.70),
         )
 
 

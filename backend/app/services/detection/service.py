@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -69,6 +70,7 @@ class DetectionService:
         self._helmet_analyzer = HelmetAnalyzer(
             self._helmet_model, config, self._device, is_pt=self._helmet_is_pt
         )
+        self._pending_evaluations: dict[int, dict[str, Any]] = {}
 
         logger.info(
             "DetectionService initialized",
@@ -109,7 +111,7 @@ class DetectionService:
         return frame, records
 
     def _process_motorcycle_tracks(self, frame: np.ndarray) -> list[DetectionRecord]:
-        """Track motorcycles; analyze helmets for each first-time crossing."""
+        """Track motorcycles; evaluate helmets across a tight window upon line crossing."""
         records: list[DetectionRecord] = []
 
         try:
@@ -131,24 +133,79 @@ class DetectionService:
             return records
 
         if result.boxes is None or len(result.boxes) == 0:
+            self._finalize_stale_evaluations(active_track_ids=set(), records=records)
             return records
 
         boxes_list = list(result.boxes)  # type: ignore[arg-type]
+        active_track_ids: set[int] = set()
+        eval_window = getattr(self._config, "eval_window_frames", 3)
+        early_exit_conf = getattr(self._config, "early_exit_conf", 0.70)
+
         for box in boxes_list:
             if box.id is None:
                 continue
 
             track_id = int(box.id.item())
+            active_track_ids.add(track_id)
             moto_box = extract_box_coords(box)
 
-            # Analyze on clean crop before drawing motorcycle box onto frame
+            # Start evaluation window when motorcycle crosses the detection line
             if self._counter.observe(track_id, moto_box.center_x):
-                records.append(self._helmet_analyzer.analyze(frame, moto_box, track_id))
+                self._pending_evaluations[track_id] = {
+                    "remaining": eval_window,
+                    "best_record": None,
+                }
+
+            # If track is in evaluation window, run lightweight helmet analysis
+            if track_id in self._pending_evaluations:
+                pending = self._pending_evaluations[track_id]
+                pending["remaining"] -= 1
+
+                record = self._helmet_analyzer.analyze(frame, moto_box, track_id)
+                self._update_best_candidate(pending, record)
+
+                # Early exit on high-confidence rider detection or window exhaustion
+                if (
+                    record.passenger_count > 0 and record.confidence >= early_exit_conf
+                ) or pending["remaining"] <= 0:
+                    best = pending["best_record"]
+                    if best is not None:
+                        records.append(best)
+                    del self._pending_evaluations[track_id]
 
             draw_box(frame, moto_box, MOTO_COLOR, f"ID:{track_id}")
 
+        self._finalize_stale_evaluations(
+            active_track_ids=active_track_ids, records=records
+        )
         return records
+
+    @staticmethod
+    def _update_best_candidate(
+        pending: dict[str, Any], candidate: DetectionRecord
+    ) -> None:
+        """Keep the best detection record for the track during its evaluation window."""
+        current = pending.get("best_record")
+        if current is None or (candidate.passenger_count, candidate.confidence) > (
+            current.passenger_count,
+            current.confidence,
+        ):
+            pending["best_record"] = candidate
+
+    def _finalize_stale_evaluations(
+        self, active_track_ids: set[int], records: list[DetectionRecord]
+    ) -> None:
+        """Finalize pending tracks that disappeared before their window expired."""
+        stale_ids = [
+            tid for tid in self._pending_evaluations if tid not in active_track_ids
+        ]
+        for tid in stale_ids:
+            best = self._pending_evaluations[tid].get("best_record")
+            if best is not None:
+                records.append(best)
+            del self._pending_evaluations[tid]
 
     def reset_tracks(self) -> None:
         """Forget crossing state (new video / stream reconnect)."""
         self._counter.reset()
+        self._pending_evaluations.clear()

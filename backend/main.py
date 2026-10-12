@@ -27,11 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 async def periodic_frame_cleanup() -> None:
-    """Periodically clean up old frames."""
+    """Periodically clean up old frames. Disabled when FRAME_RETENTION_DAYS <= 0."""
+    if FRAME_RETENTION_DAYS <= 0:
+        logger.info("Frame cleanup disabled (FRAME_RETENTION_DAYS <= 0); preserving all snapshots.")
+        return
+
     while True:
         await asyncio.sleep(CLEANUP_INTERVAL_HOURS * 3600)
         try:
-            deleted = frame_storage.cleanup_old_frames(FRAME_RETENTION_DAYS)
+            deleted = await asyncio.to_thread(
+                frame_storage.cleanup_old_frames, FRAME_RETENTION_DAYS
+            )
             if deleted > 0:
                 logger.info(f"Frame cleanup: deleted {deleted} old frames")
         except Exception:

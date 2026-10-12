@@ -56,10 +56,11 @@ def sits_on_bike(moto_box: BoundingBox, box: BoundingBox) -> bool:
     """True when a head box's center sits inside the motorcycle box or above it.
 
     Riders sit on the bike: the head center stays within the bike's horizontal
-    span and never below its bottom edge. This rejects heads from pedestrians
-    or neighbouring bikes that the padded ROI pulls in.
+    span (with a 20% margin for tilting/turning) and never below its bottom edge.
+    This rejects heads from pedestrians or neighbouring bikes that the padded ROI pulls in.
     """
-    return moto_box.x1 <= box.center_x <= moto_box.x2 and box.center_y <= moto_box.y2
+    margin = 0.2 * (moto_box.x2 - moto_box.x1)
+    return (moto_box.x1 - margin) <= box.center_x <= (moto_box.x2 + margin) and box.center_y <= moto_box.y2
 
 
 def classify(labels: list[str], on_label: str) -> tuple[bool, bool, bool]:
@@ -145,6 +146,7 @@ class HelmetAnalyzer:
             return record
 
         helmet_labels: list[str] = []
+        max_conf: float = 0.0
         if result.boxes is not None and len(result.boxes) > 0:
             for hbox in result.boxes:
                 helmet_box = extract_box_coords(hbox)
@@ -157,6 +159,15 @@ class HelmetAnalyzer:
                 if not sits_on_bike(moto_box, helmet_box):
                     continue
 
+                conf = 0.0
+                if hasattr(hbox, "conf") and hbox.conf is not None:
+                    try:
+                        conf = float(hbox.conf.item())
+                    except (TypeError, ValueError):
+                        conf = 0.0
+                if conf > max_conf:
+                    max_conf = conf
+
                 label = result.names[int(hbox.cls.item())]
                 helmet_labels.append(label)
                 draw_box(
@@ -167,6 +178,7 @@ class HelmetAnalyzer:
                 )
 
         record.passenger_count = len(helmet_labels)
+        record.confidence = max_conf
         record.helmet_status, record.over_capacity, record.violation = classify(
             helmet_labels, self._config.helmet_on
         )

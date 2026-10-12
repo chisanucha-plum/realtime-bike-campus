@@ -79,14 +79,17 @@ class FrameStorage:
             return None
 
     def cleanup_old_frames(self, days: int = 7) -> int:
-        """Remove frames older than N days.
+        """Remove frames older than N days. If days <= 0, cleanup is disabled.
 
         Args:
-            days: Number of days to keep
+            days: Number of days to keep (<= 0 preserves all frames)
 
         Returns:
             Number of files deleted
         """
+        if days <= 0:
+            return 0
+
         cutoff_date = datetime.now() - timedelta(days=days)
         deleted_count = 0
 

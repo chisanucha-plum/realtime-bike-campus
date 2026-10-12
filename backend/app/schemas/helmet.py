@@ -20,6 +20,7 @@ class HistoryStatusResponse(BaseModel):
     violation: Optional[bool] = None  # True if helmet missing
     timestamp: Optional[str] = None  # Detection timestamp
     frame_path: Optional[str] = None  # Path to saved frame image
+    confidence: Optional[float] = None  # Detection confidence score
 
 
 class StatsBucketResponse(BaseModel):

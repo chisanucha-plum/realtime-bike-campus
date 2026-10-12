@@ -1,6 +1,6 @@
 from typing import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, URL
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -44,6 +44,32 @@ def init_database() -> None:
     from app.database import user  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    try:
+        with engine.begin() as conn:
+            if engine.dialect.name == "postgresql":
+                conn.execute(
+                    text(
+                        "ALTER TABLE history_status ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION;"
+                    )
+                )
+            elif engine.dialect.name == "sqlite":
+                cols = [
+                    r[1]
+                    for r in conn.execute(
+                        text("PRAGMA table_info(history_status);")
+                    ).fetchall()
+                ]
+                if "confidence" not in cols:
+                    conn.execute(
+                        text("ALTER TABLE history_status ADD COLUMN confidence REAL;")
+                    )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_history_status_timestamp ON history_status (timestamp);"
+                )
+            )
+    except Exception:
+        pass
 
 
 def get_db() -> Generator[Session, None, None]:

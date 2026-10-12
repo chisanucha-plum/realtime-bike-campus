@@ -35,6 +35,8 @@ def create_mock_config() -> DetectionConfig:
     config.roi_bottom_pad = 1.0
     config.line_position_percent = 0.5
     config.line_overlay_alpha = 0.5
+    config.eval_window_frames = 3
+    config.early_exit_conf = 0.70
     return config
 
 
@@ -117,15 +119,17 @@ class TestTrackReset:
     """Test track reset functionality."""
 
     def test_reset_tracks_clears_state(self):
-        """Reset clears history and counted ids inside the counter."""
+        """Reset clears history, counted ids inside counter, and pending evaluations."""
         service = make_service()
         service._counter._history = {1: 100, 2: 150}
         service._counter._counted = {1, 2}
+        service._pending_evaluations = {1: {"remaining": 2, "best_record": None}}
 
         service.reset_tracks()
 
         assert service._counter._history == {}
         assert service._counter._counted == set()
+        assert service._pending_evaluations == {}
 
 
 class TestHelmetRoiGeometry:
@@ -184,11 +188,19 @@ class TestHelmetRoiGeometry:
         assert sits_on_bike(moto_box, helmet_box) is False
 
     def test_head_center_outside_horizontal_span(self):
-        """Head center beyond the bike's side is not a rider, even at head height."""
+        """Head center beyond the bike's side margin is not a rider, even at head height."""
         moto_box = BoundingBox(x1=50, y1=50, x2=150, y2=150)
         helmet_box = BoundingBox(x1=200, y1=40, x2=230, y2=70)  # center (215, 55)
 
         assert sits_on_bike(moto_box, helmet_box) is False
+
+    def test_head_center_within_horizontal_margin_is_rider(self):
+        """Head center slightly outside bike bbox (within 20% margin) is accepted."""
+        # width=100, 20% margin = 20px -> valid x: [30, 170]
+        moto_box = BoundingBox(x1=50, y1=50, x2=150, y2=150)
+        helmet_box = BoundingBox(x1=155, y1=40, x2=165, y2=70)  # center (160, 55)
+
+        assert sits_on_bike(moto_box, helmet_box) is True
 
 
 class TestHelmetVerdict:
@@ -414,3 +426,147 @@ class TestDetectionServiceInitialization:
 
         assert service._counter._history == {}
         assert service._counter._counted == set()
+        assert service._pending_evaluations == {}
+
+
+class TestEvaluationWindow:
+    """Multi-frame evaluation window captures clear frame while minimizing inferences."""
+
+    def test_early_exit_on_high_confidence(self):
+        """High confidence detection (>= 0.70) exits immediately on crossing frame."""
+        service = make_service()
+        service._counter.ensure_line(640)
+        # Establish track history left of line
+        service._counter._history[1] = 200
+
+        # Crossing box right of line (line_x is 320)
+        box = Mock()
+        box.id = Mock()
+        box.id.item.return_value = 1
+        box.xyxy = [np.array([330, 200, 430, 300])]  # center_x = 380 (crossed)
+
+        track_result = Mock()
+        track_result.boxes = [box]
+        service._moto_model.track.return_value = [track_result]
+
+        # Helmet analyzer returns confident detection
+        record = DetectionRecord(
+            motorcycle_track_id=1,
+            helmet_status=True,
+            passenger_count=1,
+            over_capacity=False,
+            violation=False,
+            confidence=0.85,
+        )
+        service._helmet_analyzer.analyze = Mock(return_value=record)
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        _, records = service.detect_and_track(frame)
+
+        assert len(records) == 1
+        assert records[0].motorcycle_track_id == 1
+        assert records[0].confidence == 0.85
+        assert 1 not in service._pending_evaluations
+        assert service._helmet_analyzer.analyze.call_count == 1
+
+    def test_window_saves_missed_frame(self):
+        """Frame 1 with 0 passengers is kept in window; Frame 2 with rider replaces it."""
+        service = make_service()
+        service._counter.ensure_line(640)
+        service._counter._history[1] = 200
+
+        box1 = Mock()
+        box1.id = Mock()
+        box1.id.item.return_value = 1
+        box1.xyxy = [np.array([330, 200, 430, 300])]
+
+        track_result1 = Mock()
+        track_result1.boxes = [box1]
+        service._moto_model.track.return_value = [track_result1]
+
+        # Frame 1: Missed (motion blur -> 0 passengers)
+        rec1 = DetectionRecord(
+            motorcycle_track_id=1,
+            helmet_status=False,
+            passenger_count=0,
+            over_capacity=False,
+            violation=False,
+            confidence=0.0,
+        )
+        service._helmet_analyzer.analyze = Mock(return_value=rec1)
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        _, records = service.detect_and_track(frame)
+
+        # Still in window: not emitted yet
+        assert len(records) == 0
+        assert 1 in service._pending_evaluations
+        assert service._pending_evaluations[1]["remaining"] == 2
+
+        # Frame 2: Clear rider detection (helmet on, 0.80)
+        box2 = Mock()
+        box2.id = Mock()
+        box2.id.item.return_value = 1
+        box2.xyxy = [np.array([350, 200, 450, 300])]
+        track_result2 = Mock()
+        track_result2.boxes = [box2]
+        service._moto_model.track.return_value = [track_result2]
+
+        rec2 = DetectionRecord(
+            motorcycle_track_id=1,
+            helmet_status=True,
+            passenger_count=1,
+            over_capacity=False,
+            violation=False,
+            confidence=0.80,
+        )
+        service._helmet_analyzer.analyze = Mock(return_value=rec2)
+
+        _, records = service.detect_and_track(frame)
+
+        # Early exit on Frame 2!
+        assert len(records) == 1
+        assert records[0].helmet_status is True
+        assert records[0].passenger_count == 1
+        assert records[0].confidence == 0.80
+        assert 1 not in service._pending_evaluations
+
+    def test_stale_track_finalization(self):
+        """Track disappearing before window expires finalizes the candidate record."""
+        service = make_service()
+        service._counter.ensure_line(640)
+        service._counter._history[1] = 200
+
+        box1 = Mock()
+        box1.id = Mock()
+        box1.id.item.return_value = 1
+        box1.xyxy = [np.array([330, 200, 430, 300])]
+        track_result1 = Mock()
+        track_result1.boxes = [box1]
+        service._moto_model.track.return_value = [track_result1]
+
+        # Moderate confidence (0.50 < 0.70 threshold)
+        rec1 = DetectionRecord(
+            motorcycle_track_id=1,
+            helmet_status=True,
+            passenger_count=1,
+            over_capacity=False,
+            violation=False,
+            confidence=0.50,
+        )
+        service._helmet_analyzer.analyze = Mock(return_value=rec1)
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        _, records = service.detect_and_track(frame)
+        assert len(records) == 0
+
+        # Frame 2: Motorcycle suddenly disappears (out of frame)
+        track_result2 = Mock()
+        track_result2.boxes = []
+        service._moto_model.track.return_value = [track_result2]
+
+        _, records = service.detect_and_track(frame)
+        assert len(records) == 1
+        assert records[0].motorcycle_track_id == 1
+        assert records[0].confidence == 0.50
+        assert 1 not in service._pending_evaluations

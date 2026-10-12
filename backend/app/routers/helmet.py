@@ -101,26 +101,13 @@ async def helmet_detection_events(
     queue = get_camera_hub(camera_id).subscribe_detections()
 
     async def generate() -> Any:
-        pending: dict[asyncio.Task[str], asyncio.Queue[str]] = {
-            asyncio.create_task(queue.get()): queue
-        }
         try:
             while True:
-                done, _ = await asyncio.wait(
-                    pending,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in done:
-                    result_queue = pending.pop(task)
-                    yield f"data: {task.result()}\n\n"
-                    pending[asyncio.create_task(result_queue.get())] = result_queue
+                payload: str = await queue.get()
+                yield f"data: {payload}\n\n"
         except asyncio.CancelledError:
             logger.info("Detection events stream client disconnected")
         finally:
-            # Cancel all pending tasks and wait for them to finish cleanly
-            for task in list(pending):
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
             get_camera_hub(camera_id).unsubscribe_detections(queue)
 
     return StreamingResponse(
@@ -131,7 +118,7 @@ async def helmet_detection_events(
 
 
 @router.get("/history", response_model=list[HistoryStatusResponse])
-async def get_history_records(
+def get_history_records(
     limit: int = Query(default=DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
     db: Session = Depends(get_db),
 ) -> list[HistoryStatusResponse]:
@@ -237,7 +224,7 @@ def _accumulate_buckets(
 
 
 @router.get("/stats", response_model=HelmetStatsResponse)
-async def get_helmet_stats(
+def get_helmet_stats(
     from_date: str | None = Query(
         default=None, alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$"
     ),
