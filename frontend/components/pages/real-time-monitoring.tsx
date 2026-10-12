@@ -12,6 +12,8 @@ import {
   EyeOff,
   MapPin,
   RotateCw,
+  Volume2,
+  VolumeX,
   X,
   Users,
 } from "lucide-react"
@@ -21,10 +23,10 @@ import { toast } from "sonner"
 import { useRealTimeDetections } from "@/hooks/useRealTimeDetections"
 import { useHelmetStats } from "@/hooks/useHelmetStats"
 import { useLanguage } from "@/hooks/useLanguage"
-import { loadDisplayPrefs, HELMET_SETTINGS_UPDATED_EVENT } from "@/lib/app-settings"
+import { loadDisplayPrefs, HELMET_SETTINGS_UPDATED_EVENT, STORAGE_KEY } from "@/lib/app-settings"
 import { playViolationBeep } from "@/lib/alert-sound"
 import { getStreamUrl } from "@/services/helmet-detection.service"
-import { DetectionList } from "@/components/real-time/DetectionList"
+import { DetectionList, DetectionSkeletonList } from "@/components/real-time/DetectionList"
 import type { DetectionResult } from "@/types/detection.types"
 
 import { cn } from "@/lib/utils"
@@ -55,6 +57,8 @@ const FloatingStatsStack = React.memo(function FloatingStatsStack({
   isRecording,
   onToggleRecording,
   cameraLoading,
+  soundEnabled,
+  onToggleSound,
   t,
 }: {
   summary: TodaySummary | null
@@ -62,6 +66,8 @@ const FloatingStatsStack = React.memo(function FloatingStatsStack({
   isRecording: boolean
   onToggleRecording: () => void
   cameraLoading: boolean
+  soundEnabled: boolean
+  onToggleSound: () => void
   t: (key: string) => string
 }) {
   const statItems = useMemo(() => [
@@ -107,6 +113,26 @@ const FloatingStatsStack = React.memo(function FloatingStatsStack({
             <NowClock />
           </span>
         </div>
+
+        {/* Quick Audio Mute/Unmute Toggle */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onToggleSound}
+          title={soundEnabled ? t("detection.muteSound") : t("detection.unmuteSound")}
+          className={cn(
+            "rounded-full h-7 sm:h-8 w-7 sm:w-8 p-0 flex items-center justify-center flex-shrink-0 shadow-xs border transition-colors",
+            soundEnabled
+              ? "bg-white/95 dark:bg-[#1E1E1E]/95 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+              : "bg-white/95 dark:bg-[#1E1E1E]/95 text-neutral-400 dark:text-neutral-500 border-neutral-200/80 dark:border-neutral-700/60 hover:text-neutral-700"
+          )}
+        >
+          {soundEnabled ? (
+            <Volume2 className="h-3.5 w-3.5" />
+          ) : (
+            <VolumeX className="h-3.5 w-3.5" />
+          )}
+        </Button>
 
         {/* Recording Toggle Button */}
         <Button
@@ -188,6 +214,8 @@ function CampusMap({
   isRecording,
   onToggleRecording,
   cameraLoading,
+  soundEnabled,
+  onToggleSound,
 }: {
   t: (key: string) => string
   mjpegUrl?: string
@@ -198,6 +226,8 @@ function CampusMap({
   isRecording: boolean
   onToggleRecording: () => void
   cameraLoading: boolean
+  soundEnabled: boolean
+  onToggleSound: () => void
 }) {
   const level = levelFromRate(violationRate)
 
@@ -238,6 +268,8 @@ function CampusMap({
           isRecording={isRecording}
           onToggleRecording={onToggleRecording}
           cameraLoading={cameraLoading}
+          soundEnabled={soundEnabled}
+          onToggleSound={onToggleSound}
           t={t}
         />
 
@@ -351,6 +383,14 @@ export function RealTimeMonitoring() {
     return () => clearInterval(id)
   }, [])
 
+  // Debounced stats refresh when new detections arrive
+  const statsDebounceTimer = useRef<NodeJS.Timeout | null>(null)
+  useEffect(() => {
+    return () => {
+      if (statsDebounceTimer.current) clearTimeout(statsDebounceTimer.current)
+    }
+  }, [])
+
   const handleNewDetections = (batch: DetectionResult[]) => {
     if (!prefs.notifyInApp && !prefs.notifySound) return
     const hasViolation = batch.some((detection) => detection.violation)
@@ -369,8 +409,11 @@ export function RealTimeMonitoring() {
     cameraId,
     onDetections: (batch) => {
       handleNewDetections(batch)
-      // When a new detection arrives, also trigger stats refresh
-      refetchRef.current()
+      // Debounce stats refresh so rapid crossings don't storm the database
+      if (statsDebounceTimer.current) clearTimeout(statsDebounceTimer.current)
+      statsDebounceTimer.current = setTimeout(() => {
+        refetchRef.current()
+      }, 1500)
     },
   })
 
@@ -396,6 +439,19 @@ export function RealTimeMonitoring() {
     ).length
     return Math.round((violations / detections.length) * 100)
   }, [summary, detections])
+
+  const handleToggleSound = () => {
+    const nextVal = !prefs.notifySound
+    const updated = { ...prefs, notifySound: nextVal }
+    setPrefs(updated)
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      window.dispatchEvent(new Event(HELMET_SETTINGS_UPDATED_EVENT))
+    } catch {
+      // ignore storage errors
+    }
+    toast.info(nextVal ? t("detection.soundUnmuted") : t("detection.soundMuted"))
+  }
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -425,6 +481,8 @@ export function RealTimeMonitoring() {
         isRecording={isRecording}
         onToggleRecording={() => setIsRecording(!isRecording)}
         cameraLoading={isLoading}
+        soundEnabled={prefs.notifySound}
+        onToggleSound={handleToggleSound}
       />
 
       {/* Latest Results Card - Clean Warm Minimalist */}
@@ -437,10 +495,7 @@ export function RealTimeMonitoring() {
         </CardHeader>
         <CardContent className="pt-4">
           {isLoading && detections.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-xs font-medium">{t("detection.loading")}</p>
-            </div>
+            <DetectionSkeletonList count={3} />
           ) : (
             <DetectionList detections={visibleDetections} t={t} />
           )}

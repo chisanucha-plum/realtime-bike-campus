@@ -44,7 +44,17 @@
     "notWearingHelmet": "ไม่สวมหมวกกันน็อค",
     "passengers": "คน",
     "overCapacityBadge": "เกินกำหนด",
-    "violation": "ฝ่าฝืน"
+    "violation": "ฝ่าฝืน",
+    "evidenceModalTitle": "ภาพหลักฐานการตรวจจับ",
+    "trackId": "มอเตอร์ไซค์",
+    "confidence": "ความมั่นใจ AI",
+    "downloadEvidence": "ดาวน์โหลดรูปหลักฐาน",
+    "copyDetails": "คัดลอกข้อมูล",
+    "detailsCopied": "คัดลอกรายละเอียดแล้ว",
+    "muteSound": "ปิดเสียงเตือน",
+    "unmuteSound": "เปิดเสียงเตือน",
+    "soundMuted": "ปิดเสียงเตือนแล้ว",
+    "soundUnmuted": "เปิดเสียงเตือนแล้ว"
   },
   "errors": {
     "errorOccurred": "เกิดข้อผิดพลาด",
@@ -171,7 +181,12 @@
     "filterOverCapacity": "นั่งเกิน 2 คน",
     "dayFilter": "กรองตามวันที่",
     "clearFilters": "ล้างตัวกรอง",
-    "violationsBadge": "ฝ่าฝืน"
+    "violationsBadge": "ฝ่าฝืน",
+    "searchPlaceholder": "ค้นหา Track ID หรือเวลา...",
+    "todayPreset": "วันนี้",
+    "yesterdayPreset": "เมื่อวาน",
+    "noMatchingResults": "ไม่พบข้อมูลที่ตรงกับตัวกรอง",
+    "noMatchingResultsDesc": "ลองเปลี่ยนคำค้นหา หรือกดล้างตัวกรองเพื่อดูรายการทั้งหมด"
   },
   "alerts": {
     "newViolation": "ตรวจพบการฝ่าฝืน",

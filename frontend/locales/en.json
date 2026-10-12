@@ -44,7 +44,17 @@
     "notWearingHelmet": "Not Wearing Helmet",
     "passengers": "Passengers",
     "overCapacityBadge": "Over Capacity",
-    "violation": "Violation"
+    "violation": "Violation",
+    "evidenceModalTitle": "Detection Evidence Snapshot",
+    "trackId": "Motorcycle",
+    "confidence": "AI Confidence",
+    "downloadEvidence": "Download Evidence",
+    "copyDetails": "Copy Info",
+    "detailsCopied": "Details copied to clipboard",
+    "muteSound": "Mute sound alerts",
+    "unmuteSound": "Unmute sound alerts",
+    "soundMuted": "Alert sound muted",
+    "soundUnmuted": "Alert sound enabled"
   },
   "errors": {
     "errorOccurred": "An Error Occurred",
@@ -171,7 +181,12 @@
     "filterOverCapacity": "Over capacity",
     "dayFilter": "Filter by day",
     "clearFilters": "Clear filters",
-    "violationsBadge": "Violations"
+    "violationsBadge": "Violations",
+    "searchPlaceholder": "Search Track ID or time...",
+    "todayPreset": "Today",
+    "yesterdayPreset": "Yesterday",
+    "noMatchingResults": "No matching records found",
+    "noMatchingResultsDesc": "Try adjusting your search query or clear the filters to view all records"
   },
   "alerts": {
     "newViolation": "Violation detected",

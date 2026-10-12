@@ -1,7 +1,16 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { AlertCircle, Download, History as HistoryIcon, RotateCw, SlidersHorizontal } from "lucide-react"
+import {
+  AlertCircle,
+  Calendar,
+  Download,
+  History as HistoryIcon,
+  RotateCw,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -14,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { DetectionList } from "@/components/real-time/DetectionList"
+import { DetectionList, DetectionSkeletonList } from "@/components/real-time/DetectionList"
 import { useLanguage } from "@/hooks/useLanguage"
 import { downloadCsv } from "@/lib/export-csv"
 import { fetchHelmetHistory } from "@/services/helmet-detection.service"
@@ -22,7 +31,8 @@ import type { DetectionResult } from "@/types/detection.types"
 
 const HISTORY_LIMIT = 500
 
-const CARD_CLASS = "rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.04)]"
+const CARD_CLASS =
+  "rounded-2xl border-neutral-200/60 dark:border-neutral-800/80 bg-white/90 dark:bg-[#18181A]/90 backdrop-blur-xl shadow-[0_4px_20px_rgba(0,0,0,0.04)]"
 const CARD_HEADER_CLASS = "pb-3 border-b border-neutral-100 dark:border-neutral-800/60"
 const CARD_TITLE_CLASS = "flex items-center gap-2 text-base font-semibold text-neutral-900 dark:text-white"
 
@@ -41,6 +51,13 @@ export function HistoryPage() {
   const [error, setError] = useState<Error | null>(null)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [dayFilter, setDayFilter] = useState<string>("")
+  const [searchQuery, setSearchQuery] = useState<string>("")
+
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const yesterdayStr = useMemo(
+    () => new Date(Date.now() - 86400000).toISOString().slice(0, 10),
+    []
+  )
 
   const load = useCallback(async () => {
     try {
@@ -59,14 +76,23 @@ export function HistoryPage() {
   }, [load])
 
   const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
     return detections.filter((detection) => {
       if (dayFilter && dayOf(detection) !== dayFilter) return false
       if (statusFilter === "violation") return detection.violation
       if (statusFilter === "compliant") return !detection.violation
       if (statusFilter === "overCapacity") return Boolean(detection.overCapacity)
+
+      if (q) {
+        const matchesTrack = String(detection.trackId ?? "").toLowerCase().includes(q)
+        const matchesTime = detection.timestamp.toLowerCase().includes(q)
+        const matchesCam = detection.camera.toLowerCase().includes(q)
+        if (!matchesTrack && !matchesTime && !matchesCam) return false
+      }
+
       return true
     })
-  }, [detections, statusFilter, dayFilter])
+  }, [detections, statusFilter, dayFilter, searchQuery])
 
   const exportCsv = () => {
     downloadCsv(
@@ -84,6 +110,13 @@ export function HistoryPage() {
   }
 
   const violationCount = filtered.filter((detection) => detection.violation).length
+  const hasActiveFilters = statusFilter !== "all" || dayFilter !== "" || searchQuery !== ""
+
+  const handleClearFilters = () => {
+    setStatusFilter("all")
+    setDayFilter("")
+    setSearchQuery("")
+  }
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -119,55 +152,102 @@ export function HistoryPage() {
         </div>
       )}
 
-      {/* Filter Toolbar */}
+      {/* Filter & Search Toolbar */}
       <Card className={CARD_CLASS}>
-        <CardContent className="flex flex-col sm:flex-row sm:items-center gap-3 p-3.5 sm:p-4">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal className="w-4 h-4 text-neutral-500 dark:text-neutral-400 hidden sm:inline" />
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-              <SelectTrigger className="w-full sm:w-[200px] rounded-xl border-neutral-200/80 dark:border-neutral-800/80 shadow-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all">{t("history.filterAll")}</SelectItem>
-                <SelectItem value="violation">{t("history.filterViolations")}</SelectItem>
-                <SelectItem value="compliant">{t("history.filterCompliant")}</SelectItem>
-                <SelectItem value="overCapacity">{t("history.filterOverCapacity")}</SelectItem>
-              </SelectContent>
-            </Select>
+        <CardContent className="p-3.5 sm:p-4 space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t("history.searchPlaceholder")}
+                className="pl-9 pr-8 rounded-xl border-neutral-200/80 dark:border-neutral-800/80 shadow-xs text-xs sm:text-sm"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Status Select */}
+            <div className="flex items-center gap-2">
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+                <SelectTrigger className="w-full sm:w-[180px] rounded-xl border-neutral-200/80 dark:border-neutral-800/80 shadow-xs text-xs sm:text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="all">{t("history.filterAll")}</SelectItem>
+                  <SelectItem value="violation">{t("history.filterViolations")}</SelectItem>
+                  <SelectItem value="compliant">{t("history.filterCompliant")}</SelectItem>
+                  <SelectItem value="overCapacity">{t("history.filterOverCapacity")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Date Input */}
+            <Input
+              type="date"
+              value={dayFilter}
+              onChange={(event) => setDayFilter(event.target.value)}
+              className="w-full sm:w-[160px] rounded-xl border-neutral-200/80 dark:border-neutral-800/80 shadow-xs text-xs sm:text-sm"
+              aria-label={t("history.dayFilter")}
+            />
           </div>
 
-          <Input
-            type="date"
-            value={dayFilter}
-            onChange={(event) => setDayFilter(event.target.value)}
-            className="w-full sm:w-[170px] rounded-xl border-neutral-200/80 dark:border-neutral-800/80 shadow-xs"
-            aria-label={t("history.dayFilter")}
-          />
+          {/* Quick Date Chips & Counts Row */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/50 text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-muted-foreground text-[11px] mr-1 hidden sm:inline">Presets:</span>
+              <Button
+                variant={dayFilter === todayStr ? "secondary" : "outline"}
+                size="sm"
+                className="h-7 px-2.5 rounded-lg text-xs font-normal"
+                onClick={() => setDayFilter(dayFilter === todayStr ? "" : todayStr)}
+              >
+                {t("history.todayPreset")}
+              </Button>
+              <Button
+                variant={dayFilter === yesterdayStr ? "secondary" : "outline"}
+                size="sm"
+                className="h-7 px-2.5 rounded-lg text-xs font-normal"
+                onClick={() => setDayFilter(dayFilter === yesterdayStr ? "" : yesterdayStr)}
+              >
+                {t("history.yesterdayPreset")}
+              </Button>
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2.5 rounded-lg text-xs text-muted-foreground hover:text-foreground"
+                  onClick={handleClearFilters}
+                >
+                  <X className="h-3 w-3 mr-1" />
+                  {t("history.clearFilters")}
+                </Button>
+              )}
+            </div>
 
-          {(statusFilter !== "all" || dayFilter) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="rounded-xl h-9 text-xs"
-              onClick={() => { setStatusFilter("all"); setDayFilter("") }}
-            >
-              {t("history.clearFilters")}
-            </Button>
-          )}
-
-          <div className="sm:ml-auto flex items-center gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/60">
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-muted/80 border border-neutral-200/80 dark:border-neutral-800/80 text-foreground">
-              {filtered.length} / {detections.length}
-            </span>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-              {t("history.violationsBadge")}: {violationCount}
-            </span>
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-muted border border-border/60 text-foreground">
+                {filtered.length} / {detections.length}
+              </span>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                {t("history.violationsBadge")}: {violationCount}
+              </span>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Detection List Container - Styled Card matching Realtime Monitoring */}
+      {/* Detection List Container */}
       <Card className={CARD_CLASS}>
         <CardHeader className={CARD_HEADER_CLASS}>
           <CardTitle className={CARD_TITLE_CLASS}>
@@ -177,14 +257,27 @@ export function HistoryPage() {
         </CardHeader>
         <CardContent className="pt-4">
           <div className="relative min-h-[200px]">
-            {!isLoading && <DetectionList detections={filtered} t={t} />}
-            {isLoading && (
-              <div className="flex items-center justify-center py-16">
-                <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                  <div className="w-8 h-8 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
-                  <p className="text-xs font-medium">{t("common.loading")}</p>
-                </div>
-              </div>
+            {isLoading ? (
+              <DetectionSkeletonList count={4} />
+            ) : (
+              <DetectionList
+                detections={filtered}
+                t={t}
+                emptyMessage={hasActiveFilters ? t("history.noMatchingResults") : undefined}
+                emptyAction={
+                  hasActiveFilters ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl text-xs gap-1.5"
+                      onClick={handleClearFilters}
+                    >
+                      <RotateCw className="h-3.5 w-3.5" />
+                      <span>{t("history.clearFilters")}</span>
+                    </Button>
+                  ) : undefined
+                }
+              />
             )}
           </div>
         </CardContent>

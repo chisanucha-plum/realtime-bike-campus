@@ -28,6 +28,7 @@ export function useRealTimeDetections(
   })
 
   const throttleTimer = useRef<NodeJS.Timeout | null>(null)
+  const pendingBatchRef = useRef<DetectionResult[]>([])
 
   const [detections, setDetections] = useState<DetectionResult[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -87,13 +88,18 @@ export function useRealTimeDetections(
           if (!isMountedRef.current) return
           failureCountRef.current = 0
           setError(null)
-          if (throttleTimer.current) clearTimeout(throttleTimer.current)
-          throttleTimer.current = setTimeout(() => {
-            if (isMountedRef.current) {
-              setDetections((prev) => [...newDetections, ...prev].slice(0, maxItems))
-              onDetectionsRef.current?.(newDetections)
-            }
-          }, 150)
+          pendingBatchRef.current.push(...newDetections)
+          if (!throttleTimer.current) {
+            throttleTimer.current = setTimeout(() => {
+              throttleTimer.current = null
+              if (isMountedRef.current && pendingBatchRef.current.length > 0) {
+                const batch = pendingBatchRef.current
+                pendingBatchRef.current = []
+                setDetections((prev) => [...batch, ...prev].slice(0, maxItems))
+                onDetectionsRef.current?.(batch)
+              }
+            }, 100)
+          }
         },
         (err) => {
           if (!isMountedRef.current) return
@@ -111,6 +117,11 @@ export function useRealTimeDetections(
     return () => {
       isMountedRef.current = false
       if (retryTimer) clearTimeout(retryTimer)
+      if (throttleTimer.current) {
+        clearTimeout(throttleTimer.current)
+        throttleTimer.current = null
+      }
+      pendingBatchRef.current = []
       sseRef.current?.()
       sseRef.current = null
     }

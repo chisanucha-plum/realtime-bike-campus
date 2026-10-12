@@ -22,6 +22,7 @@ interface RawDetection {
   frame_path?: string
   track_id?: number
   motorcycle_track_id?: string | number
+  confidence?: number
 }
 
 function toDetectionResult(
@@ -42,6 +43,7 @@ function toDetectionResult(
       (item.passenger_count !== undefined ? item.passenger_count > 2 : false),
     violation: item.violation ?? false,
     framePath: item.frame_path,
+    confidence: item.confidence,
   }
 }
 

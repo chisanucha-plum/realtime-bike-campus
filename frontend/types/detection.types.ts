@@ -12,6 +12,7 @@ export interface DetectionResult {
   overCapacity?: boolean
   violation: boolean
   framePath?: string  // Optional path to saved frame image
+  confidence?: number
 }
 
 export interface DetectionHistoryItem {
@@ -23,6 +24,7 @@ export interface DetectionHistoryItem {
   over_capacity?: boolean
   violation?: boolean
   frame_path?: string  // Optional path to saved frame image
+  confidence?: number
 }
 
 export interface DetectionEvent {
