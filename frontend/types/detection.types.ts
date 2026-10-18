@@ -28,12 +28,16 @@ export interface DetectionHistoryItem {
 }
 
 export interface DetectionEvent {
-  motorcycle_track_id: string
+  id?: string
+  motorcycle_track_id: number | string
   helmet_status: boolean
   passenger_count?: number
   over_capacity?: boolean
   violation?: boolean
+  timestamp?: string
   frame_path?: string
+  camera_id?: string
+  confidence?: number
 }
 
 export interface UseRealTimeDetectionsReturn {

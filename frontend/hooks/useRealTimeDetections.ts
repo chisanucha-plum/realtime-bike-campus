@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState } from "react"
 import { DetectionResult, UseRealTimeDetectionsReturn } from "@/types/detection.types"
 import {
   fetchHelmetHistory,
@@ -77,8 +77,7 @@ export function useRealTimeDetections(
 
     const connect = () => {
       if (!isMountedRef.current) return
-      
-      // Clean up previous connection
+
       sseRef.current?.()
       sseRef.current = null
       failureCountRef.current = 0
@@ -127,9 +126,5 @@ export function useRealTimeDetections(
     }
   }, [cameraId, isRecording, maxItems])
 
-  const handleSetIsRecording = useCallback((value: boolean) => {
-    setIsRecording(value)
-  }, [])
-
-  return { detections, isLoading, error, isRecording, setIsRecording: handleSetIsRecording }
+  return { detections, isLoading, error, isRecording, setIsRecording }
 }

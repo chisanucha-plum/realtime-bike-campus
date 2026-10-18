@@ -19,8 +19,8 @@ export type CurrentUserResponse = {
     email: string | null
     full_name: string | null
     role: UserRole
-    created_at: string | null
-    last_login: string | null
+    created_at?: string | null
+    last_login?: string | null
 }
 
 /** Error carrying the HTTP status so callers can react to specific codes (e.g. 401). */
@@ -36,8 +36,6 @@ export class ApiError extends Error {
 export async function loginWithApi(payload: LoginRequest): Promise<LoginResponse> {
     const res = await fetch(`${API_BASE_URL}/user/login`, {
         method: "POST",
-        // Required so the browser stores the cross-origin refresh-token cookie
-        // the backend sets — without it, session restore after a reload 401s.
         credentials: "include",
         headers: {
             "Content-Type": "application/json",
@@ -73,7 +71,7 @@ export async function getCurrentUser(accessToken: string): Promise<CurrentUserRe
 export async function refreshAccessToken(): Promise<{ access_token: string; refresh_token: string }> {
     const res = await fetch(`${API_BASE_URL}/user/refresh_token`, {
         method: "POST",
-        credentials: "include", // ส่ง cookies (refresh_token)
+        credentials: "include",
         headers: {
             "Content-Type": "application/json",
         },
@@ -99,10 +97,14 @@ export async function logoutApi(): Promise<void> {
     }
 }
 
-async function safeReadErrorMessage(res: Response): Promise<string | null> {
+export async function safeReadErrorMessage(res: Response): Promise<string | null> {
     try {
-        const data = (await res.json()) as { detail?: string }
-        return data.detail ?? null
+        const data = (await res.json()) as { detail?: string | Array<{ msg?: string }> }
+        if (typeof data.detail === "string") return data.detail
+        if (Array.isArray(data.detail)) {
+            return data.detail.map((d) => d.msg).filter(Boolean).join(", ") || null
+        }
+        return null
     } catch {
         return null
     }

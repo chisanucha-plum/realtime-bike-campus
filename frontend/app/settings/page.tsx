@@ -27,6 +27,7 @@ import {
 } from "@/stores/auth-store"
 import { useLanguage } from "@/hooks/useLanguage"
 import { playViolationBeep } from "@/lib/alert-sound"
+import { safeReadErrorMessage } from "@/lib/api/auth"
 import { API_BASE_URL } from "@/lib/api/config"
 import {
   HELMET_SETTINGS_UPDATED_EVENT,
@@ -246,10 +247,11 @@ export default function SettingsPage() {
         },
         body: JSON.stringify({ recipient_email: targetEmail }),
       })
-      const data = await res.json()
       if (!res.ok) {
-        throw new Error(data.detail || t("settings.testSendDigestError"))
+        const errDetail = await safeReadErrorMessage(res)
+        throw new Error(errDetail || t("settings.testSendDigestError"))
       }
+      const data = await res.json()
 
       if (data.status === "dry_run") {
         toast.info(data.message || `${t("settings.testSendDigestSuccess")} (Dry-Run: ยังไม่ได้ตั้งค่า SMTP Host)`)

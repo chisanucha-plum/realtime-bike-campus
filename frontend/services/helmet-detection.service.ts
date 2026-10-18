@@ -115,8 +115,8 @@ export function subscribeToHelmetEvents(
         const mapped: DetectionResult[] = items.map((item) =>
           toDetectionResult(
             item,
-            `trk_${item.motorcycle_track_id}_${Date.now()}`,
-            new Date().toLocaleString("th-TH")
+            item.id || `trk_${item.motorcycle_track_id}_${Date.now()}`,
+            item.timestamp || new Date().toISOString().slice(0, 19).replace("T", " ")
           )
         )
 

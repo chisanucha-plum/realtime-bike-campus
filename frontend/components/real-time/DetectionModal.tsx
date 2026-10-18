@@ -75,15 +75,23 @@ export function DetectionModal({
     })
   }
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     const filename = `evidence-${detection?.trackId ?? "snapshot"}-${Date.now()}.jpg`
-    const link = document.createElement("a")
-    link.href = imageUrl
-    link.download = filename
-    link.target = "_blank"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    try {
+      const res = await fetch(imageUrl)
+      if (!res.ok) throw new Error("Download failed")
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = blobUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(blobUrl)
+    } catch {
+      window.open(imageUrl, "_blank", "noopener,noreferrer")
+    }
   }
 
   return createPortal(

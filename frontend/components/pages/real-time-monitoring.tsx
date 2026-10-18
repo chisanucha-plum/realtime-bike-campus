@@ -23,7 +23,12 @@ import { toast } from "sonner"
 import { useRealTimeDetections } from "@/hooks/useRealTimeDetections"
 import { useHelmetStats } from "@/hooks/useHelmetStats"
 import { useLanguage } from "@/hooks/useLanguage"
-import { loadDisplayPrefs, HELMET_SETTINGS_UPDATED_EVENT, STORAGE_KEY } from "@/lib/app-settings"
+import {
+  DEFAULT_DISPLAY_PREFS,
+  HELMET_SETTINGS_UPDATED_EVENT,
+  STORAGE_KEY,
+  loadDisplayPrefs,
+} from "@/lib/app-settings"
 import { playViolationBeep } from "@/lib/alert-sound"
 import { getStreamUrl } from "@/services/helmet-detection.service"
 import { DetectionList, DetectionSkeletonList } from "@/components/real-time/DetectionList"
@@ -358,10 +363,11 @@ export function RealTimeMonitoring() {
   const cameraId = "camera-1"
   const cameraLabel = t("camera.camera1")
 
-  // Client-effective preferences from the settings page (localStorage-backed)
-  const [prefs, setPrefs] = useState(loadDisplayPrefs)
+  // Default preferences for SSR consistency; synced from localStorage on client mount
+  const [prefs, setPrefs] = useState(DEFAULT_DISPLAY_PREFS)
 
   useEffect(() => {
+    setPrefs(loadDisplayPrefs())
     const handleSettingsUpdated = () => {
       setPrefs(loadDisplayPrefs())
     }
