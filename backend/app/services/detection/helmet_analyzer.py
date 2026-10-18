@@ -30,45 +30,40 @@ def roi_bounds(
     top_pad: float,
     bottom_pad: float,
 ) -> tuple[int, int, int, int]:
-    """ROI around a motorcycle as (x1, y1, x2, y2), scaled by box size.
-
-    All pads are fractions of the motorcycle box dimensions (side pads scale
-    with width, vertical pads with height), so the ROI is scale-invariant
-    across camera distances and resolutions. Heads ride above the bbox, so
-    the top pad is the largest and the bottom the smallest. This is the only
-    place the pad geometry is defined.
-    """
+    """Scale-invariant ROI around a motorcycle as (x1, y1, x2, y2)."""
     height, width = frame_shape[:2]
-    box_width = moto_box.x2 - moto_box.x1
-    box_height = moto_box.y2 - moto_box.y1
-    horizontal_pad = side_pad * box_width
-    top = top_pad * box_height
-    bottom = bottom_pad * box_height
+    pad_x = side_pad * moto_box.width
+    top = top_pad * moto_box.height
+    bottom = bottom_pad * moto_box.height
     return (
-        int(max(0, moto_box.x1 - horizontal_pad)),
+        int(max(0, moto_box.x1 - pad_x)),
         int(max(0, moto_box.y1 - top)),
-        int(min(width, moto_box.x2 + horizontal_pad)),
+        int(min(width, moto_box.x2 + pad_x)),
         int(min(height, moto_box.y2 + bottom)),
     )
 
 
 def sits_on_bike(moto_box: BoundingBox, box: BoundingBox) -> bool:
-    """True when a head box's center sits inside the motorcycle box or above it.
-
-    Riders sit on the bike: the head center stays within the bike's horizontal
-    span (with a 20% margin for tilting/turning) and never below its bottom edge.
-    This rejects heads from pedestrians or neighbouring bikes that the padded ROI pulls in.
-    """
-    margin = 0.2 * (moto_box.x2 - moto_box.x1)
+    """Reject pedestrian/neighbouring heads outside 30% horizontal margin or below bike."""
+    margin = 0.3 * moto_box.width
     return (moto_box.x1 - margin) <= box.center_x <= (moto_box.x2 + margin) and box.center_y <= moto_box.y2
 
 
-def classify(labels: list[str], on_label: str) -> tuple[bool, bool, bool]:
-    """Reduce helmet labels to (helmet_status, over_capacity, violation).
+def same_head(
+    box: BoundingBox, kept_boxes: list[BoundingBox], moto_box: BoundingBox
+) -> bool:
+    """True when box center overlaps an already-accepted head on the same bike."""
+    tol_x = 0.12 * max(moto_box.width, 1)
+    tol_y = 0.12 * max(moto_box.height, 1)
+    return any(
+        abs(box.center_x - prev.center_x) < tol_x
+        and abs(box.center_y - prev.center_y) < tol_y
+        for prev in kept_boxes
+    )
 
-    No labels means nobody was detected: not compliant, but also no proof of a
-    violation, so the record reads NOT_DETECTED.
-    """
+
+def classify(labels: list[str], on_label: str) -> tuple[bool, bool, bool]:
+    """Reduce helmet labels to (helmet_status, over_capacity, violation)."""
     helmet_status = all(label == on_label for label in labels) if labels else False
     violation = bool(labels) and not helmet_status
     return helmet_status, len(labels) > MAX_PASSENGERS, violation
@@ -84,14 +79,6 @@ class HelmetAnalyzer:
         device: str,
         is_pt: bool = True,
     ) -> None:
-        """Bind the helmet model, its config, and the inference device.
-
-        Args:
-            model: Loaded helmet YOLO model (any exported format)
-            config: Detection configuration
-            device: Torch-style device string passed through to inference
-            is_pt: True if the model is a native PyTorch (.pt) file
-        """
         self._model = model
         self._config = config
         self._device = device
@@ -100,16 +87,7 @@ class HelmetAnalyzer:
     def analyze(
         self, frame: np.ndarray, moto_box: BoundingBox, track_id: int
     ) -> DetectionRecord:
-        """Detect helmets around one motorcycle and classify the outcome.
-
-        Args:
-            frame: Current full frame
-            moto_box: Bounding box of the tracked motorcycle
-            track_id: Motorcycle track ID
-
-        Returns:
-            DetectionRecord with passenger count and violation verdict
-        """
+        """Detect helmets around one motorcycle and classify the outcome."""
         record = DetectionRecord(
             motorcycle_track_id=track_id,
             helmet_status=False,
@@ -145,47 +123,47 @@ class HelmetAnalyzer:
             record.violation = True
             return record
 
-        helmet_labels: list[str] = []
-        max_conf: float = 0.0
-        if result.boxes is not None and len(result.boxes) > 0:
-            for hbox in result.boxes:
-                helmet_box = extract_box_coords(hbox)
-                helmet_box = BoundingBox(
-                    x1=helmet_box.x1 + x1,
-                    y1=helmet_box.y1 + y1,
-                    x2=helmet_box.x2 + x1,
-                    y2=helmet_box.y2 + y1,
-                )
-                if not sits_on_bike(moto_box, helmet_box):
-                    continue
-
+        candidates: list[tuple[float, str, BoundingBox]] = []
+        for hbox in result.boxes or []:
+            raw = extract_box_coords(hbox)
+            hbox_global = BoundingBox(raw.x1 + x1, raw.y1 + y1, raw.x2 + x1, raw.y2 + y1)
+            if not sits_on_bike(moto_box, hbox_global):
+                continue
+            try:
+                conf = float(hbox.conf.item())
+            except Exception:
                 conf = 0.0
-                if hasattr(hbox, "conf") and hbox.conf is not None:
-                    try:
-                        conf = float(hbox.conf.item())
-                    except (TypeError, ValueError):
-                        conf = 0.0
-                if conf > max_conf:
-                    max_conf = conf
+            label = result.names[int(hbox.cls.item())]
+            candidates.append((conf, label, hbox_global))
 
-                label = result.names[int(hbox.cls.item())]
-                helmet_labels.append(label)
-                draw_box(
-                    frame,
-                    helmet_box,
-                    helmet_color(label, self._config.helmet_on),
-                    label,
-                )
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        kept_boxes: list[BoundingBox] = []
+        riders: list[tuple[float, str, float]] = []
+        moto_w = max(moto_box.width, 1)
 
-        record.passenger_count = len(helmet_labels)
-        record.confidence = max_conf
+        for conf, label, hbox_global in candidates:
+            if same_head(hbox_global, kept_boxes, moto_box):
+                continue
+            kept_boxes.append(hbox_global)
+            riders.append(((hbox_global.center_x - moto_box.x1) / moto_w, label, conf))
+            draw_box(
+                frame,
+                hbox_global,
+                helmet_color(label, self._config.helmet_on),
+                label,
+            )
+
+        labels = [label for _, label, _ in riders]
+        record.passenger_count = len(riders)
+        record.confidence = riders[0][2] if riders else 0.0
+        record.riders = riders
         record.helmet_status, record.over_capacity, record.violation = classify(
-            helmet_labels, self._config.helmet_on
+            labels, self._config.helmet_on
         )
 
         logger.info(
             f"Detection ID:{track_id} | "
-            f"Helmets:{helmet_labels} | "
+            f"Helmets:{labels} | "
             f"Status:{'OK' if record.helmet_status else 'VIOLATION' if record.violation else 'NOT_DETECTED'}"
         )
         return record

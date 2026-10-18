@@ -3,7 +3,6 @@
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import cv2
 import numpy as np
@@ -17,11 +16,6 @@ class FrameStorage:
     """Save frames to disk with organized directory structure."""
 
     def __init__(self, base_dir: str | Path = "frames_storage") -> None:
-        """Initialize frame storage.
-        
-        Args:
-            base_dir: Base directory for storing frames (default: frames_storage)
-        """
         # Anchor relative paths to backend/ so the location doesn't depend on CWD
         self.base_dir = BACKEND_DIR / base_dir
         self.base_dir.mkdir(exist_ok=True)
@@ -34,31 +28,17 @@ class FrameStorage:
         violation: bool,
         quality: int = 80,
         jpeg_bytes: bytes | None = None,
-    ) -> Optional[str]:
-        """Save frame to disk.
-
-        Args:
-            frame: OpenCV frame (numpy array)
-            track_id: Motorcycle track ID
-            violation: Whether helmet violation detected
-            quality: JPEG quality (0-100)
-            jpeg_bytes: Optional pre-encoded JPEG bytes to avoid re-encoding
-
-        Returns:
-            Relative path to saved image, or None if failed
-        """
+    ) -> str | None:
+        """Save frame to disk and return relative URL path."""
         try:
-            # Create directory: frames_storage/YYYY-MM-DD
-            date_dir = self.base_dir / datetime.now().strftime("%Y-%m-%d")
+            now = datetime.now()
+            date_dir = self.base_dir / now.strftime("%Y-%m-%d")
             date_dir.mkdir(exist_ok=True)
 
-            # Filename: track_{id}_{violation}_{timestamp}.jpg
             status = "violation" if violation else "normal"
-            timestamp = datetime.now().strftime("%H%M%S%f")[:-3]  # HHmmssSSS
-            filename = f"track_{track_id}_{status}_{timestamp}.jpg"
-            filepath = date_dir / filename
+            timestamp = now.strftime("%H%M%S%f")[:-3]
+            filepath = date_dir / f"track_{track_id}_{status}_{timestamp}.jpg"
 
-            # Save frame
             if jpeg_bytes is not None:
                 data = jpeg_bytes
             else:
@@ -69,7 +49,6 @@ class FrameStorage:
                 data = buf.tobytes()
 
             filepath.write_bytes(data)
-            # Use forward slash for URL compatibility
             rel_path = str(filepath.relative_to(self.base_dir)).replace("\\", "/")
             logger.info(f"Frame saved: {rel_path}")
             return rel_path
@@ -79,33 +58,25 @@ class FrameStorage:
             return None
 
     def cleanup_old_frames(self, days: int = 7) -> int:
-        """Remove frames older than N days. If days <= 0, cleanup is disabled.
-
-        Args:
-            days: Number of days to keep (<= 0 preserves all frames)
-
-        Returns:
-            Number of files deleted
-        """
+        """Remove frames older than N days (<= 0 disables cleanup)."""
         if days <= 0:
             return 0
 
-        cutoff_date = datetime.now() - timedelta(days=days)
-        deleted_count = 0
+        cutoff = datetime.now() - timedelta(days=days)
+        deleted = 0
 
         try:
             for filepath in self.base_dir.rglob("*.jpg"):
-                if datetime.fromtimestamp(filepath.stat().st_mtime) < cutoff_date:
+                if datetime.fromtimestamp(filepath.stat().st_mtime) < cutoff:
                     filepath.unlink()
-                    deleted_count += 1
+                    deleted += 1
 
-            if deleted_count > 0:
-                logger.info(f"Cleaned up {deleted_count} old frames")
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old frames")
         except Exception as e:
             logger.error(f"Failed to cleanup frames: {e}")
 
-        return deleted_count
+        return deleted
 
 
-# Module-level singleton
 frame_storage = FrameStorage()

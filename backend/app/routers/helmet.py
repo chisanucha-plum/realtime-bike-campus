@@ -2,17 +2,16 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any, Iterator, Literal
+from typing import Annotated, Any, Iterator, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_any_user
-from app.database.database import get_db
+from app.core.auth import CurrentUserDep
+from app.database.database import DbSession
 from app.database.history_status import HistoryStatus
-from app.database.user import User
 from app.schemas.helmet import (
     HelmetStatsResponse,
     HistoryStatusResponse,
@@ -28,39 +27,37 @@ from app.services.frame_storage import frame_storage
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Helmet Detection"])
+router = APIRouter(prefix="/helmet", tags=["Helmet Detection"])
 
-# Query parameter limits for history endpoint
-DEFAULT_HISTORY_LIMIT = 50
-MAX_HISTORY_LIMIT = 500
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 500
+DEFAULT_DAYS = 7
+MAX_DAYS = 92
 
-# Date-range limits for the stats endpoint
-DEFAULT_STATS_RANGE_DAYS = 7
-MAX_STATS_RANGE_DAYS = 92
+CameraIdQuery = Annotated[str, Query(pattern=r"^camera-1$")]
 
 
 def _bucket_label(timestamp: str, bucket_size: str) -> str:
-    """Extract the aggregation label ("YYYY-MM-DD" or "YYYY-MM-DD HH") from a stored timestamp."""
+    """Extract aggregation label ('YYYY-MM-DD' or 'YYYY-MM-DD HH') from stored timestamp."""
     return timestamp[:10] if bucket_size == "day" else timestamp[:13]
 
 
-def _iter_bucket_labels(
-    range_from: date, range_to: date, bucket_size: str
-) -> Iterator[str]:
-    """Yield every bucket label in [range_from, range_to] so charts get zero-filled gaps."""
-    current = range_from
-    while current <= range_to:
+def _bucket_labels(start: date, end: date, bucket_size: str) -> Iterator[str]:
+    """Yield every bucket label in [start, end] so charts get zero-filled gaps."""
+    cur = start
+    while cur <= end:
         if bucket_size == "day":
-            yield current.isoformat()
+            yield cur.isoformat()
         else:
             for hour in range(24):
-                yield f"{current.isoformat()} {hour:02d}"
-        current += timedelta(days=1)
+                yield f"{cur.isoformat()} {hour:02d}"
+        cur += timedelta(days=1)
 
 
-@router.get("/stream", status_code=status.HTTP_200_OK)
-async def helmet_video_stream(
-    camera_id: str = Query(default="camera-1", pattern=r"^camera-1$"),
+@router.get("/stream")
+async def stream_video(
+    request: Request,
+    camera_id: CameraIdQuery = "camera-1",
 ) -> StreamingResponse:
     """Return MJPEG video stream with YOLO detection annotations."""
     logger.info("Video stream client connected")
@@ -68,14 +65,17 @@ async def helmet_video_stream(
 
     async def generate() -> Any:
         try:
-            while True:
-                frame_bytes: bytes = await q.get()
-                yield (
-                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-                    + frame_bytes
-                    + b"\r\n"
-                )
-        except asyncio.CancelledError:
+            while not await request.is_disconnected():
+                try:
+                    frame: bytes = await asyncio.wait_for(q.get(), timeout=1.0)
+                    yield (
+                        b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                        + frame
+                        + b"\r\n"
+                    )
+                except asyncio.TimeoutError:
+                    continue
+        except (asyncio.CancelledError, GeneratorExit):
             logger.info("Video stream client disconnected")
         finally:
             get_camera_hub(camera_id).unsubscribe_frames(q)
@@ -83,32 +83,31 @@ async def helmet_video_stream(
     return StreamingResponse(
         generate(),
         media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"},
     )
 
 
-@router.get("/events", status_code=status.HTTP_200_OK)
-async def helmet_detection_events(
-    camera_id: str = Query(default="camera-1", pattern=r"^camera-1$"),
+@router.get("/events")
+async def stream_events(
+    request: Request,
+    camera_id: CameraIdQuery = "camera-1",
 ) -> StreamingResponse:
-    """Return Server-Sent Events stream for detection records.
-
-    Emits detection JSON payload whenever motorcycle crosses detection line.
-
-    Example payload:
-        {"motorcycle_track_id": 1, "helmet_status": true, "violation": false, ...}
-    """
+    """Return Server-Sent Events stream for line-crossing detection records."""
     logger.info("Detection events stream client connected")
-    queue = get_camera_hub(camera_id).subscribe_detections()
+    q = get_camera_hub(camera_id).subscribe_detections()
 
     async def generate() -> Any:
         try:
-            while True:
-                payload: str = await queue.get()
-                yield f"data: {payload}\n\n"
-        except asyncio.CancelledError:
+            while not await request.is_disconnected():
+                try:
+                    payload: str = await asyncio.wait_for(q.get(), timeout=1.0)
+                    yield f"data: {payload}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
             logger.info("Detection events stream client disconnected")
         finally:
-            get_camera_hub(camera_id).unsubscribe_detections(queue)
+            get_camera_hub(camera_id).unsubscribe_detections(q)
 
     return StreamingResponse(
         generate(),
@@ -118,20 +117,10 @@ async def helmet_detection_events(
 
 
 @router.get("/history", response_model=list[HistoryStatusResponse])
-def get_history_records(
-    limit: int = Query(default=DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
-    db: Session = Depends(get_db),
-) -> list[HistoryStatusResponse]:
-    """Get recent detection history records from database.
-
-    Args:
-        limit: Number of records to return (1-500, default 50)
-        db: Database session
-
-    Returns:
-        List of detection history records sorted by timestamp descending
-    """
-    logger.info(f"Fetching {limit} detection history records")
+def get_history(
+    db: DbSession,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+) -> list[HistoryStatus]:
     return (
         db.query(HistoryStatus)
         .order_by(desc(HistoryStatus.timestamp))
@@ -141,71 +130,35 @@ def get_history_records(
 
 
 def _parse_date_range(from_date: str | None, to_date: str | None) -> tuple[date, date]:
-    """Resolve the inclusive [from, to] date window, applying defaults and validation.
-
-    Args:
-        from_date: Range start ISO date (default: DEFAULT_STATS_RANGE_DAYS back from to_date)
-        to_date: Range end ISO date (default: today)
-
-    Returns:
-        Validated (range_from, range_to) tuple
-
-    Raises:
-        HTTPException: 422 on malformed, inverted or oversized ranges
-    """
     try:
-        range_to = date.fromisoformat(to_date) if to_date else date.today()
-        range_from = (
+        end = date.fromisoformat(to_date) if to_date else date.today()
+        start = (
             date.fromisoformat(from_date)
             if from_date
-            else range_to - timedelta(days=DEFAULT_STATS_RANGE_DAYS - 1)
+            else end - timedelta(days=DEFAULT_DAYS - 1)
         )
     except ValueError as e:
         raise HTTPException(422, f"Invalid date: {e}") from e
 
-    if range_from > range_to:
+    if start > end:
         raise HTTPException(422, "'from' must not be after 'to'")
-    if (range_to - range_from).days + 1 > MAX_STATS_RANGE_DAYS:
-        raise HTTPException(
-            422,
-            f"Date range exceeds {MAX_STATS_RANGE_DAYS} days",
-        )
-    return range_from, range_to
-
-
-def _load_rows_in_range(
-    db: Session, range_from: date, range_to: date
-) -> list[HistoryStatus]:
-    """Load history rows whose stored timestamp falls within [range_from, range_to].
-
-    Timestamps are stored as "YYYY-MM-DD HH:MM:SS" strings, so plain string
-    comparison against ISO dates filters the range correctly.
-    """
-    return (
-        db.query(HistoryStatus)
-        .filter(
-            HistoryStatus.timestamp >= range_from.isoformat(),
-            HistoryStatus.timestamp < (range_to + timedelta(days=1)).isoformat(),
-        )
-        .all()
-    )
+    if (end - start).days + 1 > MAX_DAYS:
+        raise HTTPException(422, f"Date range exceeds {MAX_DAYS} days")
+    return start, end
 
 
 @dataclass
 class _StatsTotals:
-    """Period-wide counters folded out of history rows."""
-
     helmet_on: int = 0
     helmet_off: int = 0
     excess: int = 0
 
 
-def _accumulate_buckets(
+def _fill_buckets(
     buckets: dict[str, StatsBucketResponse],
     rows: list[HistoryStatus],
     bucket_size: Literal["hour", "day"],
 ) -> _StatsTotals:
-    """Fold rows into their buckets and return the period-wide totals."""
     totals = _StatsTotals()
     for row in rows:
         entry = buckets.get(_bucket_label(row.timestamp or "", bucket_size))
@@ -223,53 +176,49 @@ def _accumulate_buckets(
     return totals
 
 
-@router.get("/stats", response_model=HelmetStatsResponse)
-def get_helmet_stats(
-    from_date: str | None = Query(
-        default=None, alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$"
-    ),
-    to_date: str | None = Query(
-        default=None, alias="to", pattern=r"^\d{4}-\d{2}-\d{2}$"
-    ),
-    bucket: Literal["hour", "day"] = Query(default="day"),
-    db: Session = Depends(get_db),
+@router.get("/stats")
+def get_stats(
+    db: DbSession,
+    from_date: Annotated[
+        str | None, Query(alias="from", pattern=r"^\d{4}-\d{2}-\d{2}$")
+    ] = None,
+    to_date: Annotated[
+        str | None, Query(alias="to", pattern=r"^\d{4}-\d{2}-\d{2}$")
+    ] = None,
+    bucket: Annotated[Literal["hour", "day"], Query()] = "day",
 ) -> HelmetStatsResponse:
-    """Aggregate detection statistics over an inclusive date range.
-
-    Args:
-        from_date: Range start ISO date (default: 7 days back from to_date)
-        to_date: Range end ISO date (default: today)
-        bucket: Time-series granularity
-
-    Returns:
-        Summary totals, zero-filled series and violation breakdown
-    """
-    range_from, range_to = _parse_date_range(from_date, to_date)
-    rows = _load_rows_in_range(db, range_from, range_to)
+    start, end = _parse_date_range(from_date, to_date)
+    rows = (
+        db.query(HistoryStatus)
+        .filter(
+            HistoryStatus.timestamp >= start.isoformat(),
+            HistoryStatus.timestamp < (end + timedelta(days=1)).isoformat(),
+        )
+        .all()
+    )
 
     buckets = {
         label: StatsBucketResponse(label=label)
-        for label in _iter_bucket_labels(range_from, range_to, bucket)
+        for label in _bucket_labels(start, end, bucket)
     }
-    totals = _accumulate_buckets(buckets, rows, bucket)
+    totals = _fill_buckets(buckets, rows, bucket)
     violations = sum(entry.violations for entry in buckets.values())
 
-    denominator = totals.helmet_on + totals.helmet_off
+    total_riders = totals.helmet_on + totals.helmet_off
     summary = StatsSummaryResponse(
         total_detections=len(rows),
         total_violations=violations,
         helmet_on=totals.helmet_on,
         helmet_off=totals.helmet_off,
         excess_passengers=totals.excess,
-        compliance_percent=round(totals.helmet_on / denominator * 100, 1)
-        if denominator
+        compliance_percent=round(totals.helmet_on / total_riders * 100, 1)
+        if total_riders
         else 0.0,
     )
 
-    logger.info(f"Stats {range_from}..{range_to} ({bucket}): {len(rows)} records")
     return HelmetStatsResponse(
-        range_from=range_from.isoformat(),
-        range_to=range_to.isoformat(),
+        range_from=start.isoformat(),
+        range_to=end.isoformat(),
         bucket_size=bucket,
         summary=summary,
         series=list(buckets.values()),
@@ -281,33 +230,22 @@ def get_helmet_stats(
 
 
 @router.get("/frame/{date}/{filename}")
-async def get_frame(date: str, filename: str) -> FileResponse:
-    """Get saved frame image by date and filename.
-
-    Args:
-        date: Date folder (YYYY-MM-DD)
-        filename: Filename in format track_{id}_{status}_{timestamp}.jpg
-
-    Returns:
-        JPEG image file
-    """
+def get_frame(date: str, filename: str) -> FileResponse:
     base_dir = frame_storage.base_dir.resolve()
     filepath = (frame_storage.base_dir / date / filename).resolve()
 
     if not filepath.is_relative_to(base_dir) or not filepath.is_file():
         raise HTTPException(status_code=404, detail="Frame not found")
 
-    logger.debug(f"Serving frame: {filepath}")
     return FileResponse(filepath, media_type="image/jpeg")
 
 
-@router.post("/send-digest", response_model=SendDigestResponse)
-async def send_helmet_digest(
+@router.post("/send-digest")
+async def send_digest(
+    db: DbSession,
+    current_user: CurrentUserDep,
     request: SendDigestRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_any_user),
 ) -> SendDigestResponse:
-    """Send or dry-run daily security digest email to Security Chief."""
     recipient = str(request.recipient_email) if request and request.recipient_email else None
     try:
         result = await asyncio.to_thread(

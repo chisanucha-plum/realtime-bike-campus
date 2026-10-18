@@ -36,11 +36,11 @@ def _is_stream_url(video_path: str) -> bool:
     )
 
 
-def _describe_source(app_settings: ApplicationSettingsConfig) -> str:
+def _source_name(settings: ApplicationSettingsConfig) -> str:
     """Return a human-readable name of the configured video source for logs."""
-    if app_settings.use_webcam:
-        return f"webcam id={app_settings.webcam_id}"
-    return app_settings.video_path
+    if settings.use_webcam:
+        return f"webcam id={settings.webcam_id}"
+    return settings.video_path
 
 
 class CameraHub:
@@ -105,12 +105,21 @@ class CameraHub:
             self._stop_if_idle()
 
     def _ensure_running(self) -> None:
-        if self._thread is None or not self._thread.is_alive():
-            self._stop_event.clear()
-            self._loop = asyncio.get_event_loop()
-            self._thread = threading.Thread(target=self._run, daemon=True)
-            self._thread.start()
-            logger.info("Camera capture thread started")
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
+
+        if self._thread is not None and self._thread.is_alive():
+            if self._stop_event.is_set():
+                self._stop_event.clear()
+                logger.info("Camera capture thread keep-alive (new subscriber joined)")
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        logger.info("Camera capture thread started")
 
     def _stop_if_idle(self) -> None:
         if not self._frame_subs and not self._detect_subs:
@@ -118,18 +127,11 @@ class CameraHub:
             logger.info("Stopping camera capture (no subscribers)")
 
     def _push_frame(self, data: bytes) -> None:
-        """Push JPEG frame to all MJPEG subscribers.
-
-        Drops oldest frames if queue is full to prevent blocking and keep stream live.
-
-        Args:
-            data: JPEG frame bytes to broadcast
-        """
+        """Broadcast JPEG frame to MJPEG subscribers, dropping stale frames when full."""
         if self._loop is None:
             return
 
         def _put(q: asyncio.Queue[bytes], d: bytes) -> None:
-            """Add frame to queue, dropping old frames if necessary to prevent blocking."""
             while q.full():
                 try:
                     q.get_nowait()
@@ -148,20 +150,14 @@ class CameraHub:
     def _push_detections(
         self, records: list[DetectionRecord], frame: np.ndarray | None = None
     ) -> None:
-        """Push detection records to all subscribers and persist to database.
-
-        Args:
-            records: List of detection records to broadcast and save
-            frame: OpenCV frame (optional) to save as snapshot
-        """
+        """Persist detection records to DB and broadcast to SSE subscribers."""
+        self._save_to_db(records, frame)
         if self._loop is None:
             return
 
-        self._save_to_db(records, frame)
         payload = json.dumps([r.to_dict() for r in records], ensure_ascii=False)
 
         def _put(q: asyncio.Queue[str], p: str) -> None:
-            """Add detection payload to queue."""
             try:
                 q.put_nowait(p)
             except Exception as e:
@@ -172,17 +168,10 @@ class CameraHub:
         for q in subs:
             self._loop.call_soon_threadsafe(_put, q, payload)
 
-    # ── persistence ──────────────────────────────────────────────────────────
-
     def _save_to_db(
         self, records: list[DetectionRecord], frame: np.ndarray | None = None
     ) -> None:
-        """Persist detection records to history_status table with frame.
-
-        Args:
-            records: List of detection records to save
-            frame: OpenCV frame (optional) for saving snapshot
-        """
+        """Persist detection records and optional snapshot frame to history_status."""
         try:
             jpeg_bytes = None
             if frame is not None:
@@ -190,25 +179,26 @@ class CameraHub:
                 if ok:
                     jpeg_bytes = buf.tobytes()
 
+            now = datetime.now()
+            id_suffix = now.strftime("%Y%m%d%H%M%S%f")
+            ts_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
             with SessionLocal() as db:
                 for r in records:
-                    record_id = (
-                        f"trk_{r.motorcycle_track_id}_"
-                        f"{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-                    )
-
-                    # Save frame snapshot if provided (before storing in DB)
-                    frame_path = None
-                    if frame is not None:
-                        frame_path = frame_storage.save_frame(
+                    frame_path = (
+                        frame_storage.save_frame(
                             frame,
                             r.motorcycle_track_id,
                             r.violation,
                             jpeg_bytes=jpeg_bytes,
                         )
-                        # Update record with frame_path
-                        r.frame_path = frame_path
-
+                        if frame is not None
+                        else None
+                    )
+                    record_id = f"trk_{r.motorcycle_track_id}_{id_suffix}"
+                    r.id = record_id
+                    r.timestamp = ts_str
+                    r.frame_path = frame_path
                     db.add(
                         HistoryStatus(
                             id=record_id,
@@ -217,23 +207,15 @@ class CameraHub:
                             passenger_count=r.passenger_count,
                             over_capacity=r.over_capacity,
                             violation=r.violation,
-                            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            timestamp=ts_str,
                             frame_path=frame_path,
                             confidence=r.confidence,
                         )
                     )
                 db.commit()
-                logger.info(
-                    "Saved detections to database",
-                    extra={"record_count": len(records)},
-                )
+                logger.info("Saved detections to database", extra={"record_count": len(records)})
         except Exception as e:
-            logger.error(
-                "Failed to save detections to database",
-                extra={"error": str(e)},
-            )
-
-    # ── worker thread ────────────────────────────────────────────────────────
+            logger.error("Failed to save detections to database", extra={"error": str(e)})
 
     def _pop_latest_frame(self) -> np.ndarray | None:
         """Return the newest grabbed frame (if any) and clear the slot."""
@@ -244,24 +226,16 @@ class CameraHub:
     def _grab_loop(
         self,
         service: DetectionService,
-        app_settings: ApplicationSettingsConfig,
+        settings: ApplicationSettingsConfig,
     ) -> None:
-        """Continuously grab frames from a live source into the latest-frame slot.
-
-        Only the newest frame is kept, so the processing loop always works on
-        fresh input no matter how long inference takes. Reconnects when the
-        source drops instead of seeking (live streams cannot seek).
-
-        Args:
-            service: Detection service (reset when the stream reconnects)
-        """
+        """Continuously grab frames from a live source into the latest-frame slot."""
         cap: cv2.VideoCapture | None = None
         try:
             while not self._stop_event.is_set():
                 if cap is None or not cap.isOpened():
                     if cap is not None:
                         cap.release()
-                    cap = self._open_capture_with_retry(app_settings)
+                    cap = self._connect_live(settings)
                     if cap is None:
                         break
 
@@ -270,7 +244,7 @@ class CameraHub:
                     logger.warning("Frame grab failed on live source, reconnecting...")
                     cap.release()
                     cap = None
-                    if self._stop_event.wait(app_settings.reconnect_delay_seconds):
+                    if self._stop_event.wait(settings.reconnect_delay_seconds):
                         break
                     service.reset_tracks()
                     continue
@@ -282,24 +256,21 @@ class CameraHub:
                 cap.release()
             logger.info("Grabber thread stopped")
 
-    def _open_capture_with_retry(
-        self, app_settings: ApplicationSettingsConfig
+    def _connect_live(
+        self, settings: ApplicationSettingsConfig
     ) -> cv2.VideoCapture | None:
         """Retry opening a live source without blocking shutdown."""
         while not self._stop_event.is_set():
-            cap = self._open_capture(app_settings)
+            cap = self._open_capture(settings)
             if cap.isOpened():
-                logger.info(
-                    "Live source connected: %s",
-                    _describe_source(app_settings),
-                )
+                logger.info("Live source connected: %s", _source_name(settings))
                 return cap
             cap.release()
             logger.warning(
                 "Live source unavailable; retrying in %.1fs",
-                app_settings.reconnect_delay_seconds,
+                settings.reconnect_delay_seconds,
             )
-            if self._stop_event.wait(app_settings.reconnect_delay_seconds):
+            if self._stop_event.wait(settings.reconnect_delay_seconds):
                 break
         return None
 
@@ -313,22 +284,11 @@ class CameraHub:
 
     def _open_capture(
         self,
-        app_settings: ApplicationSettingsConfig | None = None,
+        settings: ApplicationSettingsConfig | None = None,
     ) -> cv2.VideoCapture:
-        """Open video capture from configured source (webcam, RTSP stream, or file).
-
-        Args:
-            app_settings: Application configuration (optional, uses global config if None)
-
-        Returns:
-            cv2.VideoCapture instance
-
-        Note:
-            Uses DirectShow on Windows to avoid MSMF grab errors
-        """
-        app = app_settings or config.application_settings
+        """Open video capture from configured source (webcam, RTSP stream, or file)."""
+        app = settings or config.application_settings
         if app.use_webcam:
-            # DirectShow avoids MSMF grab errors on Windows
             cap = cv2.VideoCapture(app.webcam_id, cv2.CAP_DSHOW)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             return cap
@@ -350,14 +310,14 @@ class CameraHub:
                 cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, app.read_timeout_ms)
             return cap
 
-        video_path_str = str(Path(app.video_path))
-        cap = cv2.VideoCapture(video_path_str)
+        path = str(Path(app.video_path))
+        cap = cv2.VideoCapture(path)
         if not cap.isOpened() or not cap.grab():
             cap.release()
             if hasattr(cv2, "CAP_MSMF"):
-                cap = cv2.VideoCapture(video_path_str, cv2.CAP_MSMF)
+                cap = cv2.VideoCapture(path, cv2.CAP_MSMF)
             else:
-                cap = cv2.VideoCapture(video_path_str)
+                cap = cv2.VideoCapture(path)
         else:
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
@@ -372,41 +332,34 @@ class CameraHub:
             record.camera_id = self.camera_id
 
         with self._lock:
-            has_frame_subs = bool(self._frame_subs)
+            has_frames = bool(self._frame_subs)
+            has_detects = bool(self._detect_subs)
 
-        if has_frame_subs:
+        if has_frames:
             ok, buf = cv2.imencode(
                 ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
             )
             if ok:
                 self._push_frame(buf.tobytes())
 
-        if new_records:
-            # Offload persistence and SSE push to background worker thread
+        if new_records and (has_detects or has_frames):
             self._executor.submit(self._push_detections, new_records, annotated.copy())
 
     def _run(self) -> None:
-        """Background thread loop for continuous capture and detection.
-
-        For live sources (RTSP/webcam) a dedicated grabber thread keeps only the
-        newest frame so inference lag never accumulates into stream delay. File
-        sources are read sequentially and loop back to the start when finished.
-        """
+        """Background thread loop for continuous capture and detection."""
         service = self._get_service()
         service.reset_tracks()
 
-        app_settings = config.application_settings
-        is_live_source = app_settings.use_webcam or _is_stream_url(
-            app_settings.video_path
-        )
+        settings = config.application_settings
+        is_live = settings.use_webcam or _is_stream_url(settings.video_path)
 
         grab_thread: threading.Thread | None = None
         cap: cv2.VideoCapture | None = None
 
-        if is_live_source:
+        if is_live:
             grab_thread = threading.Thread(
                 target=self._grab_loop,
-                args=(service, app_settings),
+                args=(service, settings),
                 daemon=True,
             )
             grab_thread.start()
@@ -414,20 +367,19 @@ class CameraHub:
         else:
             cap = self._open_capture()
             if not cap.isOpened():
-                logger.error(f"Failed to open video source: {app_settings.video_path}")
+                logger.error(f"Failed to open video source: {settings.video_path}")
                 return
             fps = cap.get(cv2.CAP_PROP_FPS)
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             logger.info(f"Video properties - FPS: {fps}, Total Frames: {frame_count}")
 
         jpeg_quality = config.models.jpeg_quality
-        logger.info(f"Started capturing video frames: {_describe_source(app_settings)}")
+        logger.info(f"Started capturing video frames: {_source_name(settings)}")
 
         try:
-            processed_count = 0
+            frames_read = 0
             while not self._stop_event.is_set():
-                if is_live_source:
-                    # Always process the freshest grabbed frame; skip stale ones
+                if is_live:
                     frame = self._pop_latest_frame()
                     if frame is None:
                         if self._stop_event.wait(IDLE_POLL_SEC):
@@ -440,9 +392,8 @@ class CameraHub:
                     ret, frame = cap.read()
                     if not ret or frame is None:
                         logger.warning(
-                            f"Video loop complete (read {processed_count} frames), restarting..."
+                            f"Video loop complete (read {frames_read} frames), restarting..."
                         )
-                        # Restart video from beginning
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         if not cap.grab():
                             cap.release()
@@ -450,7 +401,7 @@ class CameraHub:
                         service.reset_tracks()
                         continue
 
-                processed_count += 1
+                frames_read += 1
 
                 try:
                     self._process_frame(frame, service, jpeg_quality)
@@ -463,6 +414,8 @@ class CameraHub:
         finally:
             if cap is not None:
                 cap.release()
+            with self._lock:
+                self._thread = None
             logger.info("Video processing stopped")
 
 

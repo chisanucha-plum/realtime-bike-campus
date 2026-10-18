@@ -95,3 +95,48 @@ def test_frame_cleanup_disabled_when_days_zero_or_negative(tmp_path):
     assert test_file.exists()
     assert storage.cleanup_old_frames(days=-1) == 0
     assert test_file.exists()
+
+
+class TestCameraHubSubscriptionLifecycle:
+    """Test subscription tracking and idle stopping logic."""
+
+    def test_idle_when_all_unsubscribed(self):
+        hub = CameraHub()
+        with patch.object(hub, "_ensure_running"):
+            q_frame = hub.subscribe_frames()
+            q_det = hub.subscribe_detections()
+            assert len(hub._frame_subs) == 1
+            assert len(hub._detect_subs) == 1
+            assert not hub._stop_event.is_set()
+
+            hub.unsubscribe_frames(q_frame)
+            assert len(hub._frame_subs) == 0
+            assert not hub._stop_event.is_set()  # still has detect_subs
+
+            hub.unsubscribe_detections(q_det)
+            assert len(hub._detect_subs) == 0
+            assert hub._stop_event.is_set()  # idle now!
+
+    def test_process_frame_does_not_persist_when_no_subscribers(self):
+        from unittest.mock import MagicMock
+        hub = CameraHub()
+        mock_service = MagicMock()
+        mock_rec = MagicMock()
+        mock_service.detect_and_track.return_value = (None, [mock_rec])
+
+        with patch.object(hub._executor, "submit") as mock_submit:
+            hub._process_frame(object(), mock_service, jpeg_quality=80)
+            mock_submit.assert_not_called()
+
+    def test_ensure_running_clears_stop_event_if_alive(self):
+        from unittest.mock import MagicMock
+        hub = CameraHub()
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        hub._thread = mock_thread
+        hub._stop_event.set()
+
+        hub._ensure_running()
+        assert not hub._stop_event.is_set()
+
+

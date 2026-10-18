@@ -16,14 +16,25 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in ("true", "1", "yes"):
+        return True
+    if raw in ("false", "0", "no"):
+        return False
+    return default
+
+
+def _parse_int(value: Any, default: int) -> int:
+    try:
+        return int(value) if value is not None and value != "" else default
+    except (ValueError, TypeError):
+        return default
+
+
 @dataclass
 class DetectionConfig:
-    """Configuration for motorcycle and helmet detection.
-
-    Confidence thresholds and model params are grouped per model:
-    ``bike_confidence`` feeds the motorcycle tracker, while the
-    ``helmet_*`` fields feed the helmet classifier.
-    """
+    """Per-stage thresholds and scale-invariant ROI geometry for detection."""
 
     # Motorcycle tracking (stage 1)
     bike_id: int
@@ -39,18 +50,15 @@ class DetectionConfig:
 
     # Shared geometry / rendering
     line_position_percent: float
-    # Helmet ROI padding as fractions of the motorcycle box size —
-    # scale-invariant, so no per-site pixel tuning is needed
     roi_side_pad: float
     roi_top_pad: float
     roi_bottom_pad: float
     line_overlay_alpha: float
-    eval_window_frames: int = 3
+    eval_window_frames: int = 5
     early_exit_conf: float = 0.70
 
     @staticmethod
     def from_dict(data: dict) -> "DetectionConfig":
-        """Create DetectionConfig from dictionary."""
         return DetectionConfig(
             bike_id=data.get("bike_id", 3),
             bike_confidence=data.get("bike_confidence"),
@@ -65,15 +73,13 @@ class DetectionConfig:
             roi_top_pad=data.get("roi_top_pad"),
             roi_bottom_pad=data.get("roi_bottom_pad"),
             line_overlay_alpha=data.get("line_overlay_alpha"),
-            eval_window_frames=data.get("eval_window_frames", 3),
+            eval_window_frames=data.get("eval_window_frames", 5),
             early_exit_conf=data.get("early_exit_conf", 0.70),
         )
 
 
 @dataclass
 class ModelSettingsConfig:
-    """Model file locations and stream encoding quality."""
-
     bike_model: str
     helmet_model: str
     jpeg_quality: int
@@ -101,14 +107,7 @@ class ApplicationSettingsConfig:
     @staticmethod
     def from_dict(data: dict) -> "ApplicationSettingsConfig":
         rtsp_override = os.environ.get("RTSP_VIDEO_PATH", "").strip()
-
-        use_webcam_env = os.environ.get("USE_WEBCAM", "").strip().lower()
-        if use_webcam_env in ("true", "1", "yes"):
-            use_webcam = True
-        elif use_webcam_env in ("false", "0", "no"):
-            use_webcam = False
-        else:
-            use_webcam = data["use_webcam"]
+        use_webcam = _env_bool("USE_WEBCAM", bool(data["use_webcam"]))
 
         return ApplicationSettingsConfig(
             video_path=rtsp_override or data["video_path"],
@@ -137,15 +136,11 @@ class PostgresConfig:
             "SUPABASE_DB_URL"
         )
         port_raw = os.environ.get("DATABASE_PORT", os.environ.get("port", "5432"))
-        try:
-            port = int(port_raw) if port_raw else 5432
-        except (ValueError, TypeError):
-            port = 5432
 
         return PostgresConfig(
             database_url=database_url,
             host=os.environ.get("DATABASE_HOST", os.environ.get("host", "localhost")),
-            port=port,
+            port=_parse_int(port_raw, 5432),
             user=os.environ.get("DATABASE_USER", os.environ.get("user", "postgres")),
             password=os.environ.get(
                 "DATABASE_PASSWORD", os.environ.get("password", "")
@@ -158,8 +153,6 @@ class PostgresConfig:
 
 @dataclass
 class ServerConfig:
-    """HTTP-level settings (CORS origins, maintenance job cadence) from environment."""
-
     cors_allowed_origins: list[str]
     frame_retention_days: int
     cleanup_interval_hours: int
@@ -196,17 +189,14 @@ class RefreshTokenCookie:
         samesite_value = obj.get("samesite", "lax")
         if samesite_value not in ("lax", "strict", "none"):
             samesite_value = "lax"
-        
-        max_age_raw = obj.get("max_age", 2592000)
-        max_age = int(max_age_raw) if max_age_raw is not None else 2592000
-        
+
         return RefreshTokenCookie(
             cookie_name=str(obj.get("cookie_name", "")),
             legacy_cookie_name=str(obj.get("legacy_cookie_name", "")),
             httponly=bool(obj.get("httponly", False)),
             secure=bool(obj.get("secure", False)),
             samesite=samesite_value,
-            max_age=max_age,
+            max_age=_parse_int(obj.get("max_age"), 2592000),
             path=str(obj.get("path", "/")),
             domain=obj.get("domain"),
         )
@@ -234,8 +224,6 @@ class Key:
 
 @dataclass
 class SmtpConfig:
-    """SMTP, Resend API, and daily digest configuration."""
-
     host: str
     port: int
     user: str
@@ -249,24 +237,14 @@ class SmtpConfig:
     @staticmethod
     def from_dict(data: dict) -> "SmtpConfig":
         port_raw = os.environ.get("SMTP_PORT") or data.get("port", 587)
-        try:
-            port = int(port_raw)
-        except (ValueError, TypeError):
-            port = 587
-
-        digest_enabled_env = os.environ.get("DIGEST_ENABLED", "").strip().lower()
-        if digest_enabled_env in ("true", "1", "yes"):
-            digest_enabled = True
-        elif digest_enabled_env in ("false", "0", "no"):
-            digest_enabled = False
-        else:
-            digest_enabled = bool(data.get("digest_enabled", False))
-
+        digest_enabled = _env_bool(
+            "DIGEST_ENABLED", bool(data.get("digest_enabled", False))
+        )
         api_key = os.environ.get("RESEND_API_KEY") or str(data.get("api_key", ""))
 
         return SmtpConfig(
             host=os.environ.get("SMTP_HOST") or str(data.get("host", "")),
-            port=port,
+            port=_parse_int(port_raw, 587),
             user=os.environ.get("SMTP_USER") or str(data.get("user", "")),
             password=os.environ.get("SMTP_PASSWORD") or str(data.get("password", "")),
             from_email=os.environ.get("RESEND_FROM")
@@ -315,22 +293,10 @@ class Configuration:
     @staticmethod
     @lru_cache
     def get_config() -> "Configuration":
-        """Load and cache application configuration from JSON file.
-
-        Determines config file based on SITE environment variable (default: development).
-        Returns cached configuration to avoid reloading.
-
-        Returns:
-            Configuration object with all settings
-
-        Raises:
-            FileNotFoundError: If config file doesn't exist
-            json.JSONDecodeError: If config JSON is invalid
-        """
+        """Load and cache configuration from ``config.<SITE>.json`` (default: development)."""
         site = os.environ.get("SITE", "development")
         filename = f"config.{site}.json"
 
-        # Search current working dir, backend dir, or relative to this file
         candidate_paths = [
             Path(filename),
             Path(__file__).resolve().parent.parent / filename,

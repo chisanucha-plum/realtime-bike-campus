@@ -1,32 +1,28 @@
-from typing import Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class HistoryStatusResponse(BaseModel):
-    """API response for a single detection history record.
-
-    Contains the detection results of a motorcycle that crossed the
-    detection line, including helmet status and passenger information.
-    """
+    """API response for a single detection history record."""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: str  # Unique record ID
-    track_id: Optional[int] = None  # Motorcycle track ID
-    helmet_status: Optional[bool] = None  # True if helmet detected
-    passenger_count: Optional[int] = None  # Number of passengers
-    over_capacity: Optional[bool] = None  # True if >2 passengers
-    violation: Optional[bool] = None  # True if helmet missing
-    timestamp: Optional[str] = None  # Detection timestamp
-    frame_path: Optional[str] = None  # Path to saved frame image
-    confidence: Optional[float] = None  # Detection confidence score
+    id: str
+    track_id: int | None = None
+    helmet_status: bool | None = None
+    passenger_count: int | None = None
+    over_capacity: bool | None = None
+    violation: bool | None = None
+    timestamp: str | None = None
+    frame_path: str | None = None
+    confidence: float | None = None
 
 
 class StatsBucketResponse(BaseModel):
     """Aggregated detection counts for one time bucket (hour or day)."""
 
-    label: str  # "2026-08-23" (day) or "2026-08-23 14" (hour)
+    label: str
     total: int = 0
     violations: int = 0
 
@@ -42,7 +38,7 @@ class StatsSummaryResponse(BaseModel):
     """Period totals feeding the dashboard cards and pie chart."""
 
     total_detections: int
-    total_violations: int  # helmet violations ("violation" flag)
+    total_violations: int
     helmet_on: int
     helmet_off: int
     excess_passengers: int
@@ -52,8 +48,8 @@ class StatsSummaryResponse(BaseModel):
 class HelmetStatsResponse(BaseModel):
     """Aggregated statistics over an inclusive date range, bucketed for charting."""
 
-    range_from: str  # ISO date, inclusive
-    range_to: str  # ISO date, inclusive
+    range_from: str
+    range_to: str
     bucket_size: Literal["hour", "day"]
     summary: StatsSummaryResponse
     series: list[StatsBucketResponse]
@@ -63,7 +59,7 @@ class HelmetStatsResponse(BaseModel):
 class SendDigestRequest(BaseModel):
     """Request schema for on-demand daily digest triggering."""
 
-    recipient_email: Optional[EmailStr] = None
+    recipient_email: EmailStr | None = None
 
 
 class SendDigestResponse(BaseModel):
@@ -72,6 +68,6 @@ class SendDigestResponse(BaseModel):
     success: bool
     status: str
     message: str
-    recipient: Optional[str] = None
-    summary: Optional[dict] = None
+    recipient: str | None = None
+    summary: dict[str, Any] | None = None
 

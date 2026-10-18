@@ -28,7 +28,7 @@ from app.services.frame_storage import frame_storage
 logger = logging.getLogger(__name__)
 
 
-def calculate_daily_digest_stats(
+def calc_digest_stats(
     db: Session, target_date: date | None = None
 ) -> tuple[dict[str, Any], list[Path], list[HistoryStatus]]:
     """Aggregate detection statistics for a given day, collect sample violation snapshots, and history rows."""
@@ -46,7 +46,7 @@ def calculate_daily_digest_stats(
         .all()
     )
 
-    total_detections = len(rows)
+    total = len(rows)
     violations = sum(1 for r in rows if r.violation)
     helmet_on = sum(1 for r in rows if r.helmet_status is True)
     helmet_off = sum(1 for r in rows if r.helmet_status is False)
@@ -55,7 +55,6 @@ def calculate_daily_digest_stats(
     denom = helmet_on + helmet_off
     compliance_percent = round((helmet_on / denom) * 100, 1) if denom > 0 else 0.0
 
-    # Calculate peak violation hour
     hour_counts: dict[str, int] = {}
     for r in rows:
         if (
@@ -69,41 +68,39 @@ def calculate_daily_digest_stats(
 
     if hour_counts:
         peak_h = max(hour_counts, key=hour_counts.get)
-        peak_hour_str = f"{peak_h}:00 - {(int(peak_h)+1) % 24:02d}:00 ({hour_counts[peak_h]} ครั้ง)"
+        peak_hour = f"{peak_h}:00 - {(int(peak_h)+1) % 24:02d}:00 ({hour_counts[peak_h]} ครั้ง)"
     else:
-        peak_hour_str = "ไม่มีการกระทำผิด (0 ครั้ง)"
+        peak_hour = "ไม่มีการกระทำผิด (0 ครั้ง)"
 
-    # Collect up to 3 valid recent violation snapshot paths
-    valid_snapshot_paths: list[Path] = []
+    snapshots: list[Path] = []
     for r in reversed(rows):
         if r.violation and r.frame_path:
             p = Path(r.frame_path)
             if not p.is_file():
                 p = frame_storage.base_dir / r.frame_path
             if p.is_file():
-                valid_snapshot_paths.append(p)
-            if len(valid_snapshot_paths) >= 3:
+                snapshots.append(p)
+            if len(snapshots) >= 3:
                 break
 
     stats: dict[str, Any] = {
         "date": day_str,
-        "total_detections": total_detections,
+        "total_detections": total,
         "total_violations": violations,
         "helmet_on": helmet_on,
         "helmet_off": helmet_off,
         "over_capacity": over_capacity,
         "compliance_percent": compliance_percent,
-        "peak_hour": peak_hour_str,
-        "snapshots_count": len(valid_snapshot_paths),
+        "peak_hour": peak_hour,
+        "snapshots_count": len(snapshots),
     }
 
-    return stats, valid_snapshot_paths, rows
+    return stats, snapshots, rows
 
 
-def generate_daily_digest_csv(rows: list[HistoryStatus]) -> str:
+def build_digest_csv(rows: list[HistoryStatus]) -> str:
     """Generate CSV text with UTF-8 BOM, standardized columns starting with timestamp."""
     output = io.StringIO()
-    # Write UTF-8 BOM so Excel opens Thai characters correctly
     output.write("\ufeff")
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow([
@@ -135,7 +132,7 @@ def generate_daily_digest_csv(rows: list[HistoryStatus]) -> str:
     return output.getvalue()
 
 
-def generate_daily_digest_text(stats: dict[str, Any]) -> str:
+def build_digest_text(stats: dict[str, Any]) -> str:
     """Generate plain-text digest fallback."""
     return (
         f"=========================================\n"
@@ -153,14 +150,14 @@ def generate_daily_digest_text(stats: dict[str, Any]) -> str:
     )
 
 
-def generate_daily_digest_html(
-    stats: dict[str, Any], snapshot_paths: list[Path]
+def build_digest_html(
+    stats: dict[str, Any], snapshots: list[Path]
 ) -> str:
     """Generate responsive HTML security digest report."""
-    image_sections = []
-    for idx, path in enumerate(snapshot_paths):
+    cards = []
+    for idx, path in enumerate(snapshots):
         cid = f"snapshot_{idx}"
-        image_sections.append(
+        cards.append(
             f'<div style="margin-bottom: 16px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04); text-align: left;">'
             f'  <div style="background: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-size: 13px; font-weight: 600; color: #1e293b;">'
             f'    <span style="display: inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; margin-right: 6px;"></span>'
@@ -172,8 +169,8 @@ def generate_daily_digest_html(
             f'</div>'
         )
     snapshots_html = (
-        "".join(image_sections)
-        if image_sections
+        "".join(cards)
+        if cards
         else '<p style="color: #94a3b8; font-size: 13px;">ไม่มีภาพบันทึกการกระทำผิดในวันนี้</p>'
     )
 
@@ -248,7 +245,7 @@ def generate_daily_digest_html(
         </tr>
       </table>
 
-      <div class="section-title">หลักฐานภาพถ่ายการกระทำผิด ({len(snapshot_paths)} รายการล่าสุด)</div>
+      <div class="section-title">หลักฐานภาพถ่ายการกระทำผิด ({len(snapshots)} รายการล่าสุด)</div>
       <div class="snapshots">
         {snapshots_html}
       </div>
@@ -268,9 +265,9 @@ def digest_subject(stats: dict[str, Any]) -> str:
     return f"[Helmet Alert] รายงานสรุปความปลอดภัยประจำวัน - วันที่ {stats['date']}"
 
 
-def build_daily_digest_message(
+def build_digest_msg(
     stats: dict[str, Any],
-    snapshot_paths: list[Path],
+    snapshots: list[Path],
     from_email: str,
     to_email: str,
     csv_content: str | None = None,
@@ -281,13 +278,12 @@ def build_daily_digest_message(
     msg["From"] = from_email or "helmet-detection-system@local"
     msg["To"] = to_email
 
-    msg.set_content(generate_daily_digest_text(stats))
+    msg.set_content(build_digest_text(stats))
     msg.add_alternative(
-        generate_daily_digest_html(stats, snapshot_paths), subtype="html"
+        build_digest_html(stats, snapshots), subtype="html"
     )
 
-    # Attach images with CID and attachment headers
-    for idx, path in enumerate(snapshot_paths):
+    for idx, path in enumerate(snapshots):
         try:
             with open(path, "rb") as f:
                 img_data = f.read()
@@ -302,14 +298,12 @@ def build_daily_digest_message(
         except Exception as e:
             logger.warning(f"Could not attach snapshot {path}: {e}")
 
-    # Attach CSV report
     if csv_content:
-        csv_filename = f"helmet-digest-{stats['date']}.csv"
         msg.add_attachment(
             csv_content.encode("utf-8"),
             maintype="text",
             subtype="csv",
-            filename=csv_filename,
+            filename=f"helmet-digest-{stats['date']}.csv",
         )
 
     return msg
@@ -321,7 +315,7 @@ def send_via_resend(
     to_email: str,
     subject: str,
     html: str,
-    snapshot_paths: list[Path],
+    snapshots: list[Path],
     csv_content: str | None = None,
     csv_filename: str | None = None,
 ) -> dict[str, Any]:
@@ -334,30 +328,24 @@ def send_via_resend(
     }
 
     attachments: list[dict[str, Any]] = []
-    if snapshot_paths:
-        for idx, path in enumerate(snapshot_paths):
-            try:
-                with open(path, "rb") as f:
-                    b64_content = base64.b64encode(f.read()).decode("utf-8")
-                attachments.append(
-                    {
-                        "filename": path.name,
-                        "content": b64_content,
-                        "content_id": f"snapshot_{idx}",
-                    }
-                )
-            except Exception as e:
-                logger.warning(f"Could not read attachment {path} for Resend: {e}")
+    for idx, path in enumerate(snapshots):
+        try:
+            with open(path, "rb") as f:
+                b64_content = base64.b64encode(f.read()).decode("utf-8")
+            attachments.append(
+                {
+                    "filename": path.name,
+                    "content": b64_content,
+                    "content_id": f"snapshot_{idx}",
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Could not read attachment {path} for Resend: {e}")
 
     if csv_content:
         fname = csv_filename or "helmet-digest.csv"
         b64_csv = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
-        attachments.append(
-            {
-                "filename": fname,
-                "content": b64_csv,
-            }
-        )
+        attachments.append({"filename": fname, "content": b64_csv})
 
     if attachments:
         payload["attachments"] = attachments
@@ -391,12 +379,9 @@ def send_daily_digest(
     recipient_email: str | None = None,
     target_date: date | None = None,
 ) -> dict[str, Any]:
-    """Generate and send or dry-run daily digest email.
-
-    Tries Resend HTTPS API first if api_key is configured, then SMTP host, then dry-run.
-    """
+    """Generate and send or dry-run daily digest email."""
     config = Configuration.get_config().smtp
-    target_recipient = (
+    recipient = (
         recipient_email.strip()
         if recipient_email and recipient_email.strip()
         else (
@@ -406,42 +391,40 @@ def send_daily_digest(
         )
     )
 
-    if not target_recipient:
+    if not recipient:
         raise ValueError("Recipient email is not configured. Please provide an email address.")
 
-    stats, snapshot_paths, rows = calculate_daily_digest_stats(db, target_date)
-    csv_content = generate_daily_digest_csv(rows)
+    stats, snapshots, rows = calc_digest_stats(db, target_date)
+    csv_content = build_digest_csv(rows)
     csv_filename = f"helmet-digest-{stats['date']}.csv"
 
-    # 1. Resend API via HTTPS (Port 443)
     if config and config.api_key:
         res = send_via_resend(
             api_key=config.api_key,
             from_email=config.from_email or "onboarding@resend.dev",
-            to_email=target_recipient,
+            to_email=recipient,
             subject=digest_subject(stats),
-            html=generate_daily_digest_html(stats, snapshot_paths),
-            snapshot_paths=snapshot_paths,
+            html=build_digest_html(stats, snapshots),
+            snapshots=snapshots,
             csv_content=csv_content,
             csv_filename=csv_filename,
         )
         msg_id = res.get("id", "ok")
-        logger.info(f"Resend email sent successfully to {target_recipient}, id={msg_id}")
+        logger.info(f"Resend email sent successfully to {recipient}, id={msg_id}")
         return {
             "status": "sent",
-            "message": f"ส่งรายงานสรุปผ่าน Resend HTTPS ไปยัง {target_recipient} สำเร็จ (ID: {msg_id})",
-            "recipient": target_recipient,
+            "message": f"ส่งรายงานสรุปผ่าน Resend HTTPS ไปยัง {recipient} สำเร็จ (ID: {msg_id})",
+            "recipient": recipient,
             "summary": stats,
         }
 
-    # 2. SMTP Protocol (Ports 587/465/25)
     if config and config.host:
         from_email = config.from_email or "helmet-system@university.ac.th"
-        msg = build_daily_digest_message(
+        msg = build_digest_msg(
             stats=stats,
-            snapshot_paths=snapshot_paths,
+            snapshots=snapshots,
             from_email=from_email,
-            to_email=target_recipient,
+            to_email=recipient,
             csv_content=csv_content,
         )
         try:
@@ -453,24 +436,23 @@ def send_daily_digest(
                     server.login(config.user, config.password)
                 server.send_message(msg)
 
-            logger.info(f"Successfully sent daily digest via SMTP to {target_recipient}")
+            logger.info(f"Successfully sent daily digest via SMTP to {recipient}")
             return {
                 "status": "sent",
-                "message": f"ส่งรายงานสรุปประจำวันไปยัง {target_recipient} เรียบร้อยแล้ว",
-                "recipient": target_recipient,
+                "message": f"ส่งรายงานสรุปประจำวันไปยัง {recipient} เรียบร้อยแล้ว",
+                "recipient": recipient,
                 "summary": stats,
             }
         except Exception as e:
             logger.exception(f"Failed to send email via SMTP {config.host}:{config.port}: {e}")
             raise RuntimeError(f"SMTP send failed: {e}") from e
 
-    # 3. Dry-run fallback
     logger.info(
-        f"Neither Resend API key nor SMTP host configured. Dry-run daily digest created for {target_recipient}."
+        f"Neither Resend API key nor SMTP host configured. Dry-run daily digest created for {recipient}."
     )
     return {
         "status": "dry_run",
-        "message": f"จำลองการส่งรายงานสำเร็จ (ยังไม่ได้ตั้งค่า API Key หรือ SMTP Host) ข้อมูลส่งไปยัง {target_recipient}",
-        "recipient": target_recipient,
+        "message": f"จำลองการส่งรายงานสำเร็จ (ยังไม่ได้ตั้งค่า API Key หรือ SMTP Host) ข้อมูลส่งไปยัง {recipient}",
+        "recipient": recipient,
         "summary": stats,
     }

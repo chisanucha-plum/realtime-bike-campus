@@ -109,9 +109,24 @@ class TestDetectionRecord:
 
         result_dict = record.to_dict()
 
+        assert result_dict["id"] is None
         assert result_dict["motorcycle_track_id"] == 1
         assert result_dict["helmet_status"] is True
         assert result_dict["passenger_count"] == 2
         assert result_dict["over_capacity"] is True
         assert result_dict["violation"] is False
+        assert result_dict["timestamp"] is None
         assert result_dict["frame_path"] is None
+
+
+def test_handle_token_error_returns_401():
+    import asyncio
+    from unittest.mock import Mock
+    from app.core.exceptions import TokenDecodeError
+    from main import handle_token_error
+
+    resp = asyncio.run(
+        handle_token_error(Mock(), TokenDecodeError("Token has expired."))
+    )
+    assert resp.status_code == 401
+    assert b"Token has expired." in resp.body

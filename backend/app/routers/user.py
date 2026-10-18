@@ -1,124 +1,72 @@
-import logging
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from app.configuration import Configuration
-from app.core.auth import get_any_user
+from app.core.auth import CurrentUserDep
 from app.core.security import (
-
-    clear_refresh_token_cookies,
+    clear_refresh_cookie,
     create_access_token,
     create_refresh_token,
-    set_refresh_token_cookie,
+    set_refresh_cookie,
     verify_refresh_token,
 )
-from app.database.database import get_db
+from app.database.database import DbSession
 from app.database.user import User
 from app.schemas.user import (
     AuthUserSnapshot,
     LoginResponse,
-    PasswordResetConfirm,
-    PasswordResetRequest,
     Token,
-    UserCreate,
     UserLogin,
     UserResponse,
 )
 from app.services.auth import AuthService
 
-logger = logging.getLogger(__name__)
-
 config = Configuration.get_config()
 
-router = APIRouter(tags=["user"])
+router = APIRouter(prefix="/user", tags=["user"])
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=Token)
-def register(
-    user: UserCreate,
-    response: Response,
-    db: Annotated[Session, Depends(get_db)],
-) -> Token:
-    """Register a new user."""
-    auth_service = AuthService(db)
-    db_user = auth_service.create_user(user)
-    token_data = {"sub": db_user.id, "role": db_user.role}
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token(token_data)
-
-    set_refresh_token_cookie(response, refresh_token)
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-    )
-
-
-@router.post("/login", status_code=status.HTTP_200_OK, response_model=LoginResponse)
+@router.post("/login")
 def login(
     response: Response,
     data: UserLogin,
-    db: Annotated[Session, Depends(get_db)],
+    db: DbSession,
 ) -> LoginResponse:
-    """Login user and return access token."""
-    auth_service = AuthService(db)
-    user_obj = auth_service.authenticate_user(data.email, data.password)
-    token_data = {"sub": user_obj.id, "role": user_obj.role}
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token(token_data)
+    user = AuthService(db).authenticate(data.email, data.password)
+    claims = {"sub": user.id, "role": user.role}
+    access = create_access_token(claims)
+    refresh = create_refresh_token(claims)
 
-    set_refresh_token_cookie(response, refresh_token)
+    set_refresh_cookie(response, refresh)
     return LoginResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
+        access_token=access,
+        refresh_token=refresh,
         user=AuthUserSnapshot(
-            id=user_obj.id,
-            username=user_obj.username,
-            email=user_obj.email,
-            full_name=user_obj.full_name,
-            role=user_obj.role,
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            full_name=user.full_name,
+            role=user.role,
         ),
     )
 
 
-@router.post("/password-request", status_code=status.HTTP_200_OK)
-def password_request(
-    payload: PasswordResetRequest, db: Annotated[Session, Depends(get_db)]
-) -> dict[str, str]:
-    """Request a password reset: generates a token and (optionally) sends email."""
-    auth_service = AuthService(db)
-    auth_service.req_password_reset(payload.email)
-    return {"message": "If the email exists, a reset link has been sent."}
-
-
-@router.post("/password-reset", status_code=status.HTTP_200_OK)
-def password_reset(
-    payload: PasswordResetConfirm, db: Annotated[Session, Depends(get_db)]
-) -> dict[str, str]:
-    """Confirm password reset using token."""
-    auth_service = AuthService(db)
-    auth_service.reset_password(payload.token, payload.new_password)
-    return {"message": "Password has been reset successfully."}
-
-
-@router.post(path="/refresh_token", status_code=status.HTTP_200_OK, response_model=Token)
-def refresh_access_token(
+@router.post("/refresh_token")
+def refresh_token(
     response: Response,
     request: Request,
-    db: Annotated[Session, Depends(get_db)],
+    db: DbSession,
 ) -> Token:
-    """Refresh access token using refresh token."""
-    refresh_token = request.cookies.get(
-        config.refresh_token_cookie.cookie_name
-    ) or request.cookies.get(config.refresh_token_cookie.legacy_cookie_name)
-    if not refresh_token:
+    cookie_cfg = config.refresh_token_cookie
+    token = request.cookies.get(cookie_cfg.cookie_name) or request.cookies.get(
+        cookie_cfg.legacy_cookie_name
+    )
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token missing",
         )
 
-    payload = verify_refresh_token(refresh_token)
+    payload = verify_refresh_token(token)
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(
@@ -126,35 +74,32 @@ def refresh_access_token(
             detail="Invalid refresh token",
         )
 
-    role = db.query(User.role).filter(User.id == user_id).scalar()
-
+    role = db.query(User.role).filter(User.id == user_id, User.disabled.is_(False)).scalar()
     if not role:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
 
-    access_token = create_access_token({"sub": user_id, "role": role})
-    new_refresh_token = create_refresh_token({"sub": user_id, "role": role})
+    claims = {"sub": user_id, "role": role}
+    access = create_access_token(claims)
+    new_refresh = create_refresh_token(claims)
 
-    set_refresh_token_cookie(response, new_refresh_token)
+    set_refresh_cookie(response, new_refresh)
     return Token(
-        access_token=access_token,
-        refresh_token=new_refresh_token,
+        access_token=access,
+        refresh_token=new_refresh,
     )
 
 
-@router.post("/logout", status_code=status.HTTP_200_OK)
+@router.post("/logout")
 def logout(response: Response) -> dict[str, str]:
-    """Logout user by clearing refresh token cookie."""
-    clear_refresh_token_cookies(response)
+    clear_refresh_cookie(response)
     return {"message": "Successfully logged out"}
 
 
-@router.get("/me", status_code=status.HTTP_200_OK, response_model=UserResponse)
-def get_user_me(user: Annotated[User, Depends(get_any_user)]) -> UserResponse:
-
-    """Get current user information. Returns null for any fields that are null in database."""
+@router.get("/me")
+def get_me(user: CurrentUserDep) -> UserResponse:
     return UserResponse(
         id=user.id,
         username=user.username,

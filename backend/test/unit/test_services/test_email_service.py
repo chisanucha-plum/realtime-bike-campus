@@ -11,9 +11,11 @@ from app.configuration import Configuration, SmtpConfig
 from app.database.database import Base
 from app.database.history_status import HistoryStatus
 from app.services.email_service import (
-    build_daily_digest_message,
-    calculate_daily_digest_stats,
+    build_digest_csv,
+    build_digest_msg,
+    calc_digest_stats,
     send_daily_digest,
+    send_via_resend,
 )
 
 
@@ -78,9 +80,9 @@ def db_session():
         session.close()
 
 
-def test_calculate_daily_digest_stats(db_session):
+def test_calc_digest_stats(db_session):
     target = date(2026, 9, 30)
-    stats, snapshots, rows = calculate_daily_digest_stats(db_session, target_date=target)
+    stats, snapshots, rows = calc_digest_stats(db_session, target_date=target)
 
     assert stats["date"] == "2026-09-30"
     assert stats["total_detections"] == 3
@@ -97,9 +99,9 @@ def test_calculate_daily_digest_stats(db_session):
     assert len(rows) == 3
 
 
-def test_calculate_daily_digest_stats_empty_day(db_session):
+def test_calc_digest_stats_empty_day(db_session):
     target = date(2026, 1, 1)
-    stats, snapshots, rows = calculate_daily_digest_stats(db_session, target_date=target)
+    stats, snapshots, rows = calc_digest_stats(db_session, target_date=target)
 
     assert stats["total_detections"] == 0
     assert stats["total_violations"] == 0
@@ -108,11 +110,10 @@ def test_calculate_daily_digest_stats_empty_day(db_session):
     assert rows == []
 
 
-def test_generate_daily_digest_csv(db_session):
-    from app.services.email_service import generate_daily_digest_csv
+def test_build_digest_csv(db_session):
     target = date(2026, 9, 30)
-    _, _, rows = calculate_daily_digest_stats(db_session, target_date=target)
-    csv_text = generate_daily_digest_csv(rows)
+    _, _, rows = calc_digest_stats(db_session, target_date=target)
+    csv_text = build_digest_csv(rows)
 
     assert csv_text.startswith("\ufefftimestamp,track_id,helmet_status,passenger_count,over_capacity,violation,frame_path")
     lines = csv_text.strip().split("\n")
@@ -121,7 +122,7 @@ def test_generate_daily_digest_csv(db_session):
     assert lines[1].startswith("2026-09-30 08:15:00,1,helmet on,1,no,no")
 
 
-def test_build_daily_digest_message():
+def test_build_digest_msg():
     stats = {
         "date": "2026-09-30",
         "total_detections": 10,
@@ -132,9 +133,9 @@ def test_build_daily_digest_message():
         "compliance_percent": 70.0,
         "peak_hour": "08:00 - 09:00 (2 ครั้ง)",
     }
-    msg = build_daily_digest_message(
+    msg = build_digest_msg(
         stats=stats,
-        snapshot_paths=[],
+        snapshots=[],
         from_email="system@example.com",
         to_email="chief@example.com",
     )
@@ -251,8 +252,8 @@ def test_send_daily_digest_smtp_success(db_session):
 
 
 @pytest.mark.asyncio
-async def test_send_helmet_digest_router_endpoint(db_session):
-    from app.routers.helmet import send_helmet_digest
+async def test_send_digest_router_endpoint(db_session):
+    from app.routers.helmet import send_digest
     from app.schemas.helmet import SendDigestRequest
 
     mock_user = MagicMock()
@@ -266,7 +267,7 @@ async def test_send_helmet_digest_router_endpoint(db_session):
         }
 
         req = SendDigestRequest(recipient_email="chief@university.ac.th")
-        response = await send_helmet_digest(
+        response = await send_digest(
             request=req, db=db_session, current_user=mock_user
         )
 
@@ -279,8 +280,6 @@ async def test_send_helmet_digest_router_endpoint(db_session):
 
 
 def test_send_via_resend_http_request():
-    from app.services.email_service import send_via_resend
-    import io
     import json
 
     mock_resp = MagicMock()
@@ -296,7 +295,7 @@ def test_send_via_resend_http_request():
             to_email="security@university.ac.th",
             subject="Daily Helmet Digest",
             html="<p>Report</p>",
-            snapshot_paths=[],
+            snapshots=[],
             csv_content="timestamp,track_id\n2026-09-30 08:00:00,1",
             csv_filename="test.csv",
         )
@@ -312,7 +311,7 @@ def test_send_via_resend_http_request():
         assert payload["attachments"][0]["filename"] == "test.csv"
 
 
-def test_calculate_daily_digest_stats_malformed_timestamp(db_session):
+def test_calc_digest_stats_malformed_timestamp(db_session):
     record = HistoryStatus(
         id="rec-malformed",
         track_id=99,
@@ -326,10 +325,9 @@ def test_calculate_daily_digest_stats_malformed_timestamp(db_session):
     db_session.add(record)
     db_session.commit()
 
-    stats, _, _ = calculate_daily_digest_stats(
+    stats, _, _ = calc_digest_stats(
         db_session, target_date=date(2026, 9, 30)
     )
-    # Shouldn't crash and should safely handle non-standard timestamp
     assert stats["peak_hour"] is not None
 
 

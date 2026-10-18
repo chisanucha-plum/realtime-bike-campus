@@ -123,13 +123,13 @@ class TestTrackReset:
         service = make_service()
         service._counter._history = {1: 100, 2: 150}
         service._counter._counted = {1, 2}
-        service._pending_evaluations = {1: {"remaining": 2, "best_record": None}}
+        service._pending = {1: {"remaining": 2, "best_record": None}}
 
         service.reset_tracks()
 
         assert service._counter._history == {}
         assert service._counter._counted == set()
-        assert service._pending_evaluations == {}
+        assert service._pending == {}
 
 
 class TestHelmetRoiGeometry:
@@ -361,6 +361,36 @@ class TestHelmetAnalyzer:
         assert record.helmet_status is True
         assert record.passenger_count == 1
 
+    def test_duplicate_overlapping_head_boxes_suppressed(self):
+        """Overlapping duplicate boxes on the same head are deduplicated to 1 rider."""
+        box_hi = Mock()
+        box_hi.xyxy = [np.array([200.0, 10.0, 224.0, 32.0])]
+        box_hi.cls = Mock()
+        box_hi.cls.item.return_value = 1
+        box_hi.conf = Mock()
+        box_hi.conf.item.return_value = 0.88
+
+        box_lo = Mock()
+        box_lo.xyxy = [np.array([201.0, 10.0, 224.0, 31.0])]
+        box_lo.cls = Mock()
+        box_lo.cls.item.return_value = 1
+        box_lo.conf = Mock()
+        box_lo.conf.item.return_value = 0.35
+
+        result = Mock()
+        result.boxes = [box_lo, box_hi]
+        result.names = {1: "helmet on"}
+        analyzer = make_analyzer(lambda image, **kwargs: [result])
+
+        moto_box = BoundingBox(x1=300, y1=200, x2=400, y2=300)
+        record = analyzer.analyze(
+            np.zeros((480, 640, 3), dtype=np.uint8), moto_box, track_id=9
+        )
+
+        assert record.passenger_count == 1
+        assert record.confidence == 0.88
+        assert record.over_capacity is False
+
 
 class TestConfidenceWiring:
     """Ensure each model is called with its own configured confidence."""
@@ -426,37 +456,35 @@ class TestDetectionServiceInitialization:
 
         assert service._counter._history == {}
         assert service._counter._counted == set()
-        assert service._pending_evaluations == {}
+        assert service._pending == {}
 
 
 class TestEvaluationWindow:
-    """Multi-frame evaluation window captures clear frame while minimizing inferences."""
+    """Multi-frame evaluation window captures clear frame and fuses multi-rider slots."""
 
     def test_early_exit_on_high_confidence(self):
-        """High confidence detection (>= 0.70) exits immediately on crossing frame."""
+        """Confident multi-passenger detection (>= 2 riders, >= 0.70) exits immediately."""
         service = make_service()
         service._counter.ensure_line(640)
-        # Establish track history left of line
         service._counter._history[1] = 200
 
-        # Crossing box right of line (line_x is 320)
         box = Mock()
         box.id = Mock()
         box.id.item.return_value = 1
-        box.xyxy = [np.array([330, 200, 430, 300])]  # center_x = 380 (crossed)
+        box.xyxy = [np.array([330, 200, 430, 300])]
 
         track_result = Mock()
         track_result.boxes = [box]
         service._moto_model.track.return_value = [track_result]
 
-        # Helmet analyzer returns confident detection
         record = DetectionRecord(
             motorcycle_track_id=1,
-            helmet_status=True,
-            passenger_count=1,
+            helmet_status=False,
+            passenger_count=2,
             over_capacity=False,
-            violation=False,
+            violation=True,
             confidence=0.85,
+            riders=[(0.52, "helmet on", 0.85), (0.34, "helmet off", 0.65)],
         )
         service._helmet_analyzer.analyze = Mock(return_value=record)
 
@@ -465,12 +493,62 @@ class TestEvaluationWindow:
 
         assert len(records) == 1
         assert records[0].motorcycle_track_id == 1
+        assert records[0].passenger_count == 2
+        assert records[0].violation is True
         assert records[0].confidence == 0.85
-        assert 1 not in service._pending_evaluations
+        assert 1 not in service._pending
         assert service._helmet_analyzer.analyze.call_count == 1
 
+    def test_multi_frame_pillion_and_three_passenger_fusion(self):
+        """Driver in frame 1 + occluded pillion & 3rd rider in frames 2-3 fuse into 3 riders."""
+        service = make_service()
+        service._counter.ensure_line(640)
+        service._counter._history[18] = 200
+
+        box = Mock()
+        box.id = Mock()
+        box.id.item.return_value = 18
+        box.xyxy = [np.array([340, 200, 450, 300])]
+        track_result = Mock()
+        track_result.boxes = [box]
+        service._moto_model.track.return_value = [track_result]
+
+        # Frame 1: Only driver visible (rx=0.51, helmet on, conf=0.82) -> does NOT early-exit!
+        rec1 = DetectionRecord(
+            motorcycle_track_id=18,
+            helmet_status=True,
+            passenger_count=1,
+            over_capacity=False,
+            violation=False,
+            confidence=0.82,
+            riders=[(0.51, "helmet on", 0.82)],
+        )
+        # Frame 2: Pillion without helmet (rx=0.35) + 3rd rider on tail (rx=0.18) emerge!
+        rec2 = DetectionRecord(
+            motorcycle_track_id=18,
+            helmet_status=False,
+            passenger_count=2,
+            over_capacity=False,
+            violation=True,
+            confidence=0.58,
+            riders=[(0.35, "helmet off", 0.58), (0.18, "helmet off", 0.52)],
+        )
+        service._helmet_analyzer.analyze = Mock(side_effect=[rec1, rec2])
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        _, records1 = service.detect_and_track(frame)
+        assert len(records1) == 0  # kept open for occluded pillion riders
+
+        _, records2 = service.detect_and_track(frame)
+        assert len(records2) == 1
+        assert records2[0].passenger_count == 3
+        assert records2[0].over_capacity is True
+        assert records2[0].violation is True
+        assert records2[0].helmet_status is False
+        assert records2[0].confidence == 0.82
+
     def test_window_saves_missed_frame(self):
-        """Frame 1 with 0 passengers is kept in window; Frame 2 with rider replaces it."""
+        """Frame 1 with 0 passengers is kept in window; later frame with rider replaces it."""
         service = make_service()
         service._counter.ensure_line(640)
         service._counter._history[1] = 200
@@ -493,25 +571,7 @@ class TestEvaluationWindow:
             violation=False,
             confidence=0.0,
         )
-        service._helmet_analyzer.analyze = Mock(return_value=rec1)
-
-        frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        _, records = service.detect_and_track(frame)
-
-        # Still in window: not emitted yet
-        assert len(records) == 0
-        assert 1 in service._pending_evaluations
-        assert service._pending_evaluations[1]["remaining"] == 2
-
-        # Frame 2: Clear rider detection (helmet on, 0.80)
-        box2 = Mock()
-        box2.id = Mock()
-        box2.id.item.return_value = 1
-        box2.xyxy = [np.array([350, 200, 450, 300])]
-        track_result2 = Mock()
-        track_result2.boxes = [box2]
-        service._moto_model.track.return_value = [track_result2]
-
+        # Frames 2 & 3: Clear rider detection (helmet on, 0.80)
         rec2 = DetectionRecord(
             motorcycle_track_id=1,
             helmet_status=True,
@@ -519,17 +579,23 @@ class TestEvaluationWindow:
             over_capacity=False,
             violation=False,
             confidence=0.80,
+            riders=[(0.50, "helmet on", 0.80)],
         )
-        service._helmet_analyzer.analyze = Mock(return_value=rec2)
+        service._helmet_analyzer.analyze = Mock(side_effect=[rec1, rec2, rec2])
+
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        _, records = service.detect_and_track(frame)
+        assert len(records) == 0
 
         _, records = service.detect_and_track(frame)
+        assert len(records) == 0
 
-        # Early exit on Frame 2!
+        _, records = service.detect_and_track(frame)
         assert len(records) == 1
         assert records[0].helmet_status is True
         assert records[0].passenger_count == 1
         assert records[0].confidence == 0.80
-        assert 1 not in service._pending_evaluations
+        assert 1 not in service._pending
 
     def test_stale_track_finalization(self):
         """Track disappearing before window expires finalizes the candidate record."""
@@ -569,4 +635,4 @@ class TestEvaluationWindow:
         assert len(records) == 1
         assert records[0].motorcycle_track_id == 1
         assert records[0].confidence == 0.50
-        assert 1 not in service._pending_evaluations
+        assert 1 not in service._pending
